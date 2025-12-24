@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": "E:/esp32"
+		},
+		{
+			"name": "esp32 imu",
+			"path": ".."
+		}
+	],
+	"settings": {
+		"files.exclude": {
+			"**/*.rpyc": true,
+			"**/*.rpa": true,
+			"**/*.rpymc": true,
+			"**/cache/": true
+		}
+	}
+}
