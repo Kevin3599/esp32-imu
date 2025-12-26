@@ -9,18 +9,18 @@ void Init_mpu6050()
 {
   Serial.println("尝试初始化MPU6050...");
   
-  // 尝试初始化MPU6050
-  if (!mpu.begin()) {
-    Serial.println("❌ Failed to find MPU6050 chip");
+  // 使用I2C0总线初始化MPU6050
+  if (!mpu.begin(0x68, &I2C_MPU)) {
+    Serial.println("❌ Failed to find MPU6050 chip on I2C0");
     Serial.println("可能的问题：");
-    Serial.println("  1. MPU6050未正确连接");
+    Serial.println("  1. MPU6050未正确连接到I2C0 (GPIO21/22)");
     Serial.println("  2. I2C地址不正确 (应为0x68或0x69)");
     Serial.println("  3. 供电问题");
     Serial.println("  4. I2C总线接线错误");
     
     // 尝试不同的I2C地址
     Serial.println("尝试不同的I2C地址...");
-    if (!mpu.begin(0x69)) {  // 尝试备用地址
+    if (!mpu.begin(0x69, &I2C_MPU)) {  // 尝试备用地址
       Serial.println("❌ 在0x69地址也找不到MPU6050");
       Serial.println("⚠️  系统将继续运行但没有MPU6050数据");
       return;
@@ -28,6 +28,7 @@ void Init_mpu6050()
       Serial.println("✅ 在地址0x69找到MPU6050！");
     }
   } else {
+    Serial.println("✅ MPU6050 Found at default address 0x68 on I2C0!");
     Serial.println("✅ MPU6050 Found at default address 0x68!");
   }
   

@@ -22,9 +22,14 @@
 #include <Adafruit_SSD1306.h>
 #include "mpu6050.h"
 
-// I²C引脚定义 (共享总线)
-#define I2C_SDA 21     // 共享I²C总线的SDA引脚
-#define I2C_SCL 22     // 共享I²C总线的SCL引脚
+// I²C双路总线引脚定义
+// I2C0 - MPU6050传感器
+#define I2C0_SDA 21    // MPU6050 SDA引脚
+#define I2C0_SCL 22    // MPU6050 SCL引脚
+
+// I2C1 - OLED显示屏
+#define I2C1_SDA 18    // OLED SDA引脚  
+#define I2C1_SCL 19    // OLED SCL引脚
 
 // OLED显示屏配置
 #define SCREEN_WIDTH 128
@@ -32,8 +37,12 @@
 #define OLED_RESET -1
 #define SCREEN_ADDRESS 0x3C
 
-// 创建显示器对象
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+// 双路I²C总线设计
+TwoWire I2C_MPU = TwoWire(0);  // I2C0 - MPU6050传感器
+TwoWire I2C_OLED = TwoWire(1); // I2C1 - OLED显示屏
+
+// 创建显示器对象（使用I2C1）
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &I2C_OLED, OLED_RESET);
 
 // 定时变量
 unsigned long lastUpdateTime = 0;
@@ -55,30 +64,120 @@ void handleSerialCommands();
 void scanI2CDevices();
 
 /**
- * 更新OLED显示
+ * 更新OLED显示 - 图形化六轴显示
  */
 void updateDisplay() {
   display.clearDisplay();
   
-  // 标题
+  // 屏幕中心点
+  int centerX = SCREEN_WIDTH / 2;   // 64
+  int centerY = SCREEN_HEIGHT / 2;  // 32
+  
+  // 绘制坐标轴参考线
+  display.drawPixel(centerX, centerY, SSD1306_WHITE); // 中心点
+  
+  // 绘制水平和垂直参考线
+  display.drawLine(centerX - 30, centerY, centerX + 30, centerY, SSD1306_WHITE); // 水平线
+  display.drawLine(centerX, centerY - 20, centerX, centerY + 20, SSD1306_WHITE); // 垂直线
+  
+  // Roll箭头 (左侧，绕X轴旋转)
+  float rollRad = mpu6050_data.Roll * PI / 180.0;
+  int rollArrowLen = 25;
+  int rollX = centerX - 50;
+  int rollY = centerY;
+  
+  int rollEndX = rollX + rollArrowLen * cos(rollRad - PI/2);
+  int rollEndY = rollY + rollArrowLen * sin(rollRad - PI/2);
+  
+  // 绘制Roll箭头
+  display.drawLine(rollX, rollY, rollEndX, rollEndY, SSD1306_WHITE);
+  // 箭头头部
+  display.drawLine(rollEndX, rollEndY, 
+                   rollEndX - 3 * cos(rollRad - PI/2 - 0.5), 
+                   rollEndY - 3 * sin(rollRad - PI/2 - 0.5), SSD1306_WHITE);
+  display.drawLine(rollEndX, rollEndY, 
+                   rollEndX - 3 * cos(rollRad - PI/2 + 0.5), 
+                   rollEndY - 3 * sin(rollRad - PI/2 + 0.5), SSD1306_WHITE);
+  
+  // Roll标签和数值
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println("ESP32 IMU 数据");
+  display.setCursor(rollX - 20, rollY + 15);
+  display.print("R:");
+  display.print((int)mpu6050_data.Roll);
   
-  // 加速度数据
-  display.setCursor(0, 12);
-  display.println("加速度 (m/s²):");
-  display.setCursor(0, 22);
-  display.printf("X:%.2f Y:%.2f", mpu6050_data.Acc_X, mpu6050_data.Acc_Y);
-  display.setCursor(0, 32);
-  display.printf("Z:%.2f", mpu6050_data.Acc_Z);
+  // Pitch箭头 (右侧，绕Y轴旋转)
+  float pitchRad = mpu6050_data.Pitch * PI / 180.0;
+  int pitchArrowLen = 25;
+  int pitchX = centerX + 50;
+  int pitchY = centerY;
   
-  // 姿态角数据
-  display.setCursor(0, 44);
-  display.println("姿态角 (°):");
-  display.setCursor(0, 54);
-  display.printf("R:%.1f P:%.1f", mpu6050_data.Roll, mpu6050_data.Pitch);
+  int pitchEndX = pitchX + pitchArrowLen * cos(pitchRad - PI/2);
+  int pitchEndY = pitchY + pitchArrowLen * sin(pitchRad - PI/2);
+  
+  // 绘制Pitch箭头
+  display.drawLine(pitchX, pitchY, pitchEndX, pitchEndY, SSD1306_WHITE);
+  // 箭头头部
+  display.drawLine(pitchEndX, pitchEndY, 
+                   pitchEndX - 3 * cos(pitchRad - PI/2 - 0.5), 
+                   pitchEndY - 3 * sin(pitchRad - PI/2 - 0.5), SSD1306_WHITE);
+  display.drawLine(pitchEndX, pitchEndY, 
+                   pitchEndX - 3 * cos(pitchRad - PI/2 + 0.5), 
+                   pitchEndY - 3 * sin(pitchRad - PI/2 + 0.5), SSD1306_WHITE);
+  
+  // Pitch标签和数值
+  display.setCursor(pitchX - 10, pitchY + 15);
+  display.print("P:");
+  display.print((int)mpu6050_data.Pitch);
+  
+  // 加速度合成矢量 (中心箭头)
+  float totalAccel = sqrt(mpu6050_data.Acc_X * mpu6050_data.Acc_X + 
+                         mpu6050_data.Acc_Y * mpu6050_data.Acc_Y + 
+                         mpu6050_data.Acc_Z * mpu6050_data.Acc_Z);
+  
+  // 基于加速度计算方向 (简化显示)
+  float accelAngle = atan2(mpu6050_data.Acc_Y, mpu6050_data.Acc_X);
+  int accelLen = map(constrain(totalAccel, 8, 12), 8, 12, 5, 15); // 映射到箭头长度
+  
+  int accelEndX = centerX + accelLen * cos(accelAngle);
+  int accelEndY = centerY + accelLen * sin(accelAngle);
+  
+  // 绘制加速度矢量箭头
+  display.drawLine(centerX, centerY, accelEndX, accelEndY, SSD1306_WHITE);
+  display.drawLine(accelEndX, accelEndY, 
+                   accelEndX - 2 * cos(accelAngle - 0.5), 
+                   accelEndY - 2 * sin(accelAngle - 0.5), SSD1306_WHITE);
+  display.drawLine(accelEndX, accelEndY, 
+                   accelEndX - 2 * cos(accelAngle + 0.5), 
+                   accelEndY - 2 * sin(accelAngle + 0.5), SSD1306_WHITE);
+  
+  // 角速度指示器 (顶部三个小条)
+  int gyroBarY = 5;
+  int gyroBarWidth = 2;
+  int gyroBarMaxHeight = 10;
+  
+  // X轴角速度条
+  int gyroXHeight = map(constrain(abs(mpu6050_data.Angle_Velocity_R * 180/PI), 0, 100), 0, 100, 1, gyroBarMaxHeight);
+  display.fillRect(centerX - 20, gyroBarY + gyroBarMaxHeight - gyroXHeight, gyroBarWidth, gyroXHeight, SSD1306_WHITE);
+  display.setCursor(centerX - 22, gyroBarY + gyroBarMaxHeight + 2);
+  display.print("X");
+  
+  // Y轴角速度条
+  int gyroYHeight = map(constrain(abs(mpu6050_data.Angle_Velocity_P * 180/PI), 0, 100), 0, 100, 1, gyroBarMaxHeight);
+  display.fillRect(centerX - 1, gyroBarY + gyroBarMaxHeight - gyroYHeight, gyroBarWidth, gyroYHeight, SSD1306_WHITE);
+  display.setCursor(centerX - 3, gyroBarY + gyroBarMaxHeight + 2);
+  display.print("Y");
+  
+  // Z轴角速度条
+  int gyroZHeight = map(constrain(abs(mpu6050_data.Angle_Velocity_Y * 180/PI), 0, 100), 0, 100, 1, gyroBarMaxHeight);
+  display.fillRect(centerX + 18, gyroBarY + gyroBarMaxHeight - gyroZHeight, gyroBarWidth, gyroZHeight, SSD1306_WHITE);
+  display.setCursor(centerX + 16, gyroBarY + gyroBarMaxHeight + 2);
+  display.print("Z");
+  
+  // 温度显示 (右上角)
+  display.setCursor(90, 0);
+  display.print((int)mpu6050_data.Temperature);
+  display.print("C");
   
   display.display();
 }
@@ -167,33 +266,49 @@ void handleSerialCommands() {
  */
 void scanI2CDevices() {
   Serial.println("正在扫描I2C设备...");
-  int deviceCount = 0;
   
+  // 扫描I2C0总线 (MPU6050)
+  Serial.println("I2C0总线 (GPIO21/22) - MPU6050:");
+  int deviceCount0 = 0;
   for (byte address = 1; address < 127; address++) {
-    Wire.beginTransmission(address);
-    byte error = Wire.endTransmission();
+    I2C_MPU.beginTransmission(address);
+    byte error = I2C_MPU.endTransmission();
     
     if (error == 0) {
-      Serial.printf("找到I2C设备，地址: 0x%02X", address);
+      Serial.printf("  找到I2C设备，地址: 0x%02X", address);
       if (address == 0x68) {
         Serial.print(" (MPU6050)");
-      } else if (address == 0x3C) {
-        Serial.print(" (OLED SSD1306)");
       }
       Serial.println();
-      deviceCount++;
+      deviceCount0++;
     }
   }
   
-  if (deviceCount == 0) {
+  // 扫描I2C1总线 (OLED)
+  Serial.println("I2C1总线 (GPIO18/19) - OLED:");
+  int deviceCount1 = 0;
+  for (byte address = 1; address < 127; address++) {
+    I2C_OLED.beginTransmission(address);
+    byte error = I2C_OLED.endTransmission();
+    
+    if (error == 0) {
+      Serial.printf("  找到I2C设备，地址: 0x%02X", address);
+      if (address == 0x3C) {
+        Serial.print(" (OLED SSD1306)");
+      }
+      Serial.println();
+      deviceCount1++;
+    }
+  }
+  
+  if (deviceCount0 == 0 && deviceCount1 == 0) {
     Serial.println("❌ 未找到任何I2C设备！");
     Serial.println("请检查：");
-    Serial.println("  - SDA接线 (GPIO21)");
-    Serial.println("  - SCL接线 (GPIO22)");
-    Serial.println("  - 设备供电");
-    Serial.println("  - 接线是否松动");
+    Serial.println("  MPU6050: SDA(GPIO21), SCL(GPIO22)");
+    Serial.println("  OLED:    SDA(GPIO18), SCL(GPIO19)");
+    Serial.println("  设备供电和接线");
   } else {
-    Serial.printf("✅ 总共找到 %d 个I2C设备\n", deviceCount);
+    Serial.printf("✅ I2C0总线找到 %d 个设备，I2C1总线找到 %d 个设备\n", deviceCount0, deviceCount1);
   }
   Serial.println();
 }
@@ -201,10 +316,14 @@ void scanI2CDevices() {
 void setup() {
   Serial.begin(115200);
   Serial.println("ESP32 IMU+OLED项目启动...");
+  Serial.println("使用双路I2C配置：");
+  Serial.println("  I2C0 (GPIO21/22) - MPU6050传感器");
+  Serial.println("  I2C1 (GPIO18/19) - OLED显示屏");
   
-  // 初始化I²C总线
-  Serial.println("初始化I²C总线...");
-  Wire.begin(I2C_SDA, I2C_SCL);
+  // 初始化双路I²C总线
+  Serial.println("初始化双路I²C总线...");
+  I2C_MPU.begin(I2C0_SDA, I2C0_SCL, 400000);   // I2C0 - MPU6050
+  I2C_OLED.begin(I2C1_SDA, I2C1_SCL, 400000);  // I2C1 - OLED
   
   // 等待I2C稳定
   delay(100);

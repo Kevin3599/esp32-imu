@@ -5,6 +5,9 @@
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
 
+// 外部I2C总线声明
+extern TwoWire I2C_MPU;  // 使用I2C0总线
+
 // 全局MPU6050对象
 extern Adafruit_MPU6050 mpu;
 
