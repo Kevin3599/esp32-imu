@@ -161,7 +161,7 @@ void updateDisplay() {
   display.fillRect(centerX - 20, gyroBarY + gyroBarMaxHeight - gyroXHeight, gyroBarWidth, gyroXHeight, SSD1306_WHITE);
   display.setCursor(centerX - 22, gyroBarY + gyroBarMaxHeight + 2);
   display.print("X");
-  
+  q
   // Y轴角速度条
   int gyroYHeight = map(constrain(abs(mpu6050_data.Angle_Velocity_P * 180/PI), 0, 100), 0, 100, 1, gyroBarMaxHeight);
   display.fillRect(centerX - 1, gyroBarY + gyroBarMaxHeight - gyroYHeight, gyroBarWidth, gyroYHeight, SSD1306_WHITE);
