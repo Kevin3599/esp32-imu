@@ -71,30 +71,33 @@ void updateDisplay() {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   
-  // 顶部显示基本数据 (温度和加速度)
-  display.setCursor(0, 0);
-  display.print("T:");
-  display.print((int)mpu6050_data.Temperature);
-  display.setCursor(35, 0);
-  display.print("G:");
-  display.print(sqrt(mpu6050_data.Acc_X_Filtered * mpu6050_data.Acc_X_Filtered + 
-                     mpu6050_data.Acc_Y_Filtered * mpu6050_data.Acc_Y_Filtered + 
-                     mpu6050_data.Acc_Z_Filtered * mpu6050_data.Acc_Z_Filtered), 1);
-  
-  // 3D立方体显示区域 (使用屏幕中心区域 32x32像素)
-  int centerX = 64;   // 屏幕中心X (128/2)
-  int centerY = 35;   // 屏幕中心Y (稍微下移)
-  
   // 根据实际数据分析，传感器垂直安装时X轴承受主要重力
   // X=10.25, Y=-0.5, Z=0.5 说明X轴垂直向下
   // 重新校准：假设静止时X轴应该是-9.8 (向下)
   float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;  // 校准偏移 (10.25-9.8)
   float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;   // 校准Y轴偏移
-  float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.5;   // 校准Z轴偏移
+  float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;  // 微调Z轴偏移，消除Roll的-1度偏移
+  
+  // 计算校正后的合成加速度
+  float corrected_total_accel = sqrt(acc_x_corrected * acc_x_corrected + 
+                                    acc_y_corrected * acc_y_corrected + 
+                                    acc_z_corrected * acc_z_corrected);
+  
+  // 顶部显示基本数据 (温度和校正后的加速度)
+  display.setCursor(0, 0);
+  display.print("T:");
+  display.print((int)mpu6050_data.Temperature);
+  display.setCursor(35, 0);
+  display.print("G:");
+  display.print(corrected_total_accel, 1);
+  
+  // 3D立方体显示区域 (使用屏幕中心区域 32x32像素)
+  int centerX = 64;   // 屏幕中心X (128/2)
+  int centerY = 35;   // 屏幕中心Y (稍微下移)
   
   // 基于校正后的加速度计算倾斜角度
   // 垂直安装：X轴向下为重力方向
-  float roll = -atan2(acc_z_corrected, acc_x_corrected) * 180.0 / PI;   // 绕Y轴转动(前后倾斜)
+  float roll = -atan2(acc_z_corrected, acc_x_corrected) * 180.0 / PI + 1.0;   // 绕Y轴转动(前后倾斜) + 补偿1度偏移
   float pitch = atan2(acc_y_corrected, acc_x_corrected) * 180.0 / PI;   // 绕Z轴转动(左右倾斜)
   float yaw = (mpu6050_data.Gyro_X_Filtered * 180/PI) * 0.1;            // X轴角速度积分
   
