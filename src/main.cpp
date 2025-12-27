@@ -20,6 +20,9 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <SPIFFS.h>
 #include "mpu6050.h"
 
 // I²C双路总线引脚定义
@@ -44,6 +47,16 @@ TwoWire I2C_OLED = TwoWire(1); // I2C1 - OLED显示屏
 // 创建显示器对象（使用I2C1）
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &I2C_OLED, OLED_RESET);
 
+// WiFi热点配置
+const char* ap_ssid = "ESP32-IMU";
+const char* ap_password = "12345678";
+
+// Web服务器
+WebServer server(80);
+
+// 显示模式：0=IMU数据, 1=二维码
+int display_mode = 1;
+
 // 定时变量
 unsigned long lastUpdateTime = 0;
 const unsigned long UPDATE_INTERVAL = 100; // 100ms更新间隔
@@ -66,6 +79,68 @@ void scanI2CDevices();
 /**
  * 更新OLED显示 - 图形化六轴显示
  */
+// Web服务器处理函数
+void handleRoot() {
+    File file = SPIFFS.open("/index.html", "r");
+    if (!file) {
+        server.send(404, "text/plain", "HTML file not found!");
+        return;
+    }
+    
+    server.streamFile(file, "text/html");
+    file.close();
+}
+
+void handleData() {
+    // 重新计算校正后的数据（与显示函数保持一致）
+    float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;
+    float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;
+    float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;
+    
+    float corrected_total_accel = sqrt(acc_x_corrected * acc_x_corrected + 
+                                      acc_y_corrected * acc_y_corrected + 
+                                      acc_z_corrected * acc_z_corrected);
+    
+    float roll = -atan2(acc_z_corrected, acc_x_corrected) * 180.0 / PI + 1.0;
+    float pitch = atan2(acc_y_corrected, acc_x_corrected) * 180.0 / PI;
+    float yaw = (mpu6050_data.Gyro_X_Filtered * 180/PI) * 0.1;
+    
+    // 构建JSON响应
+    char json_buffer[200];
+    sprintf(json_buffer, 
+        "{\"temp\":%d,\"gravity\":%.1f,\"roll\":%d,\"pitch\":%d,\"yaw\":%d}",
+        (int)mpu6050_data.Temperature,
+        corrected_total_accel,
+        (int)roll,
+        (int)pitch,
+        (int)yaw
+    );
+    
+    server.send(200, "application/json", json_buffer);
+}
+
+void displayQRCode() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    
+    // 显示WiFi信息
+    display.setCursor(0, 0);
+    display.println("WiFi: ESP32-IMU");
+    display.println("Pass: 12345678");
+    display.println("");
+    display.println("Scan QR or visit:");
+    display.println("http://192.168.4.1");
+    display.println("");
+    display.println("Press BOOT to switch");
+    
+    // 简单的二维码替代（文字版）
+    display.setCursor(0, 56);
+    display.print("QR: 192.168.4.1");
+    
+    display.display();
+}
+
 void updateDisplay() {
   display.clearDisplay();
   display.setTextSize(1);
@@ -315,6 +390,9 @@ void setup() {
   Serial.println("  I2C0 (GPIO21/22) - MPU6050传感器");
   Serial.println("  I2C1 (GPIO18/19) - OLED显示屏");
   
+  // 配置BOOT按钮
+  pinMode(0, INPUT_PULLUP);
+  
   // 初始化双路I²C总线
   Serial.println("初始化双路I²C总线...");
   I2C_MPU.begin(I2C0_SDA, I2C0_SCL, 400000);   // I2C0 - MPU6050
@@ -361,10 +439,58 @@ void setup() {
   Serial.println("📡 输入 'help' 或 '?' 查看串口打印模式选择");
   Serial.println("🔄 当前模式: 混合模式 (简要+定期详细)");
   Serial.println("");
+  
+  // 初始化SPIFFS文件系统
+  Serial.println("正在初始化SPIFFS文件系统...");
+  if (!SPIFFS.begin(true)) {
+    Serial.println("❌ SPIFFS初始化失败!");
+  } else {
+    Serial.println("✅ SPIFFS初始化成功");
+    // 列出文件系统中的文件
+    File root = SPIFFS.open("/");
+    File file = root.openNextFile();
+    while(file) {
+      Serial.printf("  文件: %s (%d bytes)\n", file.name(), file.size());
+      file = root.openNextFile();
+    }
+  }
+  
+  // 初始化WiFi热点
+  Serial.println("正在创建WiFi热点...");
+  WiFi.softAP(ap_ssid, ap_password);
+  IPAddress ip = WiFi.softAPIP();
+  Serial.print("热点已创建! IP地址: ");
+  Serial.println(ip);
+  Serial.println("热点名称: ESP32-IMU");
+  Serial.println("密码: 12345678");
+  Serial.println("网页地址: http://192.168.4.1");
+  
+  // 配置Web服务器路由
+  server.on("/", handleRoot);
+  server.on("/data", handleData);
+  server.begin();
+  Serial.println("Web服务器已启动!");
+  Serial.println("");
+  
+  // 初始显示二维码模式
+  display_mode = 1;
+  displayQRCode();
 }
 
 void loop() {
   unsigned long currentTime = millis();
+  
+  // 处理Web服务器请求
+  server.handleClient();
+  
+  // 检查BOOT按钮切换显示模式（GPIO0通常是BOOT按钮）
+  static bool lastBootState = HIGH;
+  bool currentBootState = digitalRead(0);
+  if (lastBootState == HIGH && currentBootState == LOW) {
+    display_mode = 1 - display_mode; // 切换显示模式
+    delay(200); // 防抖
+  }
+  lastBootState = currentBootState;
   
   // 处理串口命令
   handleSerialCommands();
@@ -372,7 +498,14 @@ void loop() {
   // 定时更新数据和显示
   if (currentTime - lastUpdateTime >= UPDATE_INTERVAL) {
     ReadMPU6050();  // 使用Adafruit库读取MPU6050数据
-    updateDisplay();
+    
+    // 根据显示模式选择显示内容
+    if (display_mode == 0) {
+      updateDisplay();  // 显示IMU数据
+    } else {
+      displayQRCode();  // 显示二维码
+    }
+    
     printDataToSerial();
     
     lastUpdateTime = currentTime;

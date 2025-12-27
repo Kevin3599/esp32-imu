@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32 IMU Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background: #f0f0f0; 
+        }
+        .container { 
+            max-width: 800px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 20px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .data-box { 
+            padding: 15px; 
+            border: 2px solid #4CAF50; 
+            border-radius: 8px; 
+            text-align: center; 
+            background: #f9fff9;
+        }
+        .data-value { 
+            font-size: 24px; 
+            font-weight: bold; 
+            color: #4CAF50; 
+            display: block;
+            margin-bottom: 5px;
+        }
+        .data-label { 
+            font-size: 12px; 
+            color: #666; 
+        }
+        #cube-container { 
+            width: 300px; 
+            height: 300px; 
+            margin: 20px auto; 
+            border: 1px solid #ddd; 
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        .status {
+            text-align: center; 
+            color: #666; 
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .connected {
+            background: #4CAF50;
+            color: white;
+        }
+        .disconnected {
+            background: #f44336;
+            color: white;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div class="connection-status" id="status">连接中...</div>
+    
+    <div class="container">
+        <h1>🎯 ESP32 IMU 实时监控</h1>
+        
+        <div class="data-grid">
+            <div class="data-box">
+                <span class="data-value" id="temp">--</span>
+                <div class="data-label">温度 (°C)</div>
+            </div>
+            <div class="data-box">
+                <span class="data-value" id="gravity">--</span>
+                <div class="data-label">重力 (m/s²)</div>
+            </div>
+            <div class="data-box">
+                <span class="data-value" id="roll">--</span>
+                <div class="data-label">Roll (°)</div>
+            </div>
+            <div class="data-box">
+                <span class="data-value" id="pitch">--</span>
+                <div class="data-label">Pitch (°)</div>
+            </div>
+            <div class="data-box">
+                <span class="data-value" id="yaw">--</span>
+                <div class="data-label">Yaw (°)</div>
+            </div>
+        </div>
+
+        <div id="cube-container"></div>
+        
+        <div class="status">
+            数据更新频率: 10Hz | 滤波: 启用 | 传感器: MPU6050
+        </div>
+    </div>
+
+    <script>
+        // Three.js 3D立方体
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(300, 300);
+        renderer.setClearColor(0xfafafa);
+        document.getElementById('cube-container').appendChild(renderer.domElement);
+
+        // 创建立方体
+        const geometry = new THREE.BoxGeometry(2, 2, 2);
+        const edges = new THREE.EdgesGeometry(geometry);
+        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x4CAF50, linewidth: 2 }));
+        scene.add(line);
+
+        // 添加坐标轴
+        const axesHelper = new THREE.AxesHelper(3);
+        scene.add(axesHelper);
+
+        // 添加网格地面
+        const gridHelper = new THREE.GridHelper(4, 8, 0xcccccc, 0xeeeeee);
+        gridHelper.position.y = -2;
+        scene.add(gridHelper);
+
+        camera.position.set(4, 4, 4);
+        camera.lookAt(0, 0, 0);
+
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // 连接状态管理
+        let isConnected = false;
+        const statusEl = document.getElementById('status');
+
+        function updateConnectionStatus(connected) {
+            isConnected = connected;
+            statusEl.className = 'connection-status ' + (connected ? 'connected' : 'disconnected');
+            statusEl.textContent = connected ? '已连接' : '连接断开';
+        }
+
+        // 获取数据并更新显示
+        function updateData() {
+            fetch('/data')
+                .then(response => {
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    return response.json();
+                })
+                .then(data => {
+                    // 更新连接状态
+                    updateConnectionStatus(true);
+                    
+                    // 更新数据显示
+                    document.getElementById('temp').textContent = data.temp;
+                    document.getElementById('gravity').textContent = data.gravity;
+                    document.getElementById('roll').textContent = data.roll;
+                    document.getElementById('pitch').textContent = data.pitch;
+                    document.getElementById('yaw').textContent = data.yaw;
+                    
+                    // 更新3D立方体姿态
+                    line.rotation.x = data.roll * Math.PI / 180;
+                    line.rotation.y = data.pitch * Math.PI / 180;
+                    line.rotation.z = data.yaw * Math.PI / 180 * 0.1;
+                })
+                .catch(error => {
+                    console.log('数据获取失败:', error);
+                    updateConnectionStatus(false);
+                });
+        }
+
+        // 每100ms更新一次数据
+        setInterval(updateData, 100);
+        updateData(); // 立即更新一次
+    </script>
+</body>
+</html>
