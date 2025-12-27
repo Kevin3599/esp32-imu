@@ -68,116 +68,108 @@ void scanI2CDevices();
  */
 void updateDisplay() {
   display.clearDisplay();
-  
-  // 屏幕中心点
-  int centerX = SCREEN_WIDTH / 2;   // 64
-  int centerY = SCREEN_HEIGHT / 2;  // 32
-  
-  // 绘制坐标轴参考线
-  display.drawPixel(centerX, centerY, SSD1306_WHITE); // 中心点
-  
-  // 绘制水平和垂直参考线
-  display.drawLine(centerX - 30, centerY, centerX + 30, centerY, SSD1306_WHITE); // 水平线
-  display.drawLine(centerX, centerY - 20, centerX, centerY + 20, SSD1306_WHITE); // 垂直线
-  
-  // Roll箭头 (左侧，绕X轴旋转)
-  float rollRad = mpu6050_data.Roll * PI / 180.0;
-  int rollArrowLen = 25;
-  int rollX = centerX - 50;
-  int rollY = centerY;
-  
-  int rollEndX = rollX + rollArrowLen * cos(rollRad - PI/2);
-  int rollEndY = rollY + rollArrowLen * sin(rollRad - PI/2);
-  
-  // 绘制Roll箭头
-  display.drawLine(rollX, rollY, rollEndX, rollEndY, SSD1306_WHITE);
-  // 箭头头部
-  display.drawLine(rollEndX, rollEndY, 
-                   rollEndX - 3 * cos(rollRad - PI/2 - 0.5), 
-                   rollEndY - 3 * sin(rollRad - PI/2 - 0.5), SSD1306_WHITE);
-  display.drawLine(rollEndX, rollEndY, 
-                   rollEndX - 3 * cos(rollRad - PI/2 + 0.5), 
-                   rollEndY - 3 * sin(rollRad - PI/2 + 0.5), SSD1306_WHITE);
-  
-  // Roll标签和数值
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(rollX - 20, rollY + 15);
-  display.print("R:");
-  display.print((int)mpu6050_data.Roll);
   
-  // Pitch箭头 (右侧，绕Y轴旋转)
-  float pitchRad = mpu6050_data.Pitch * PI / 180.0;
-  int pitchArrowLen = 25;
-  int pitchX = centerX + 50;
-  int pitchY = centerY;
-  
-  int pitchEndX = pitchX + pitchArrowLen * cos(pitchRad - PI/2);
-  int pitchEndY = pitchY + pitchArrowLen * sin(pitchRad - PI/2);
-  
-  // 绘制Pitch箭头
-  display.drawLine(pitchX, pitchY, pitchEndX, pitchEndY, SSD1306_WHITE);
-  // 箭头头部
-  display.drawLine(pitchEndX, pitchEndY, 
-                   pitchEndX - 3 * cos(pitchRad - PI/2 - 0.5), 
-                   pitchEndY - 3 * sin(pitchRad - PI/2 - 0.5), SSD1306_WHITE);
-  display.drawLine(pitchEndX, pitchEndY, 
-                   pitchEndX - 3 * cos(pitchRad - PI/2 + 0.5), 
-                   pitchEndY - 3 * sin(pitchRad - PI/2 + 0.5), SSD1306_WHITE);
-  
-  // Pitch标签和数值
-  display.setCursor(pitchX - 10, pitchY + 15);
-  display.print("P:");
-  display.print((int)mpu6050_data.Pitch);
-  
-  // 加速度合成矢量 (中心箭头)
-  float totalAccel = sqrt(mpu6050_data.Acc_X * mpu6050_data.Acc_X + 
-                         mpu6050_data.Acc_Y * mpu6050_data.Acc_Y + 
-                         mpu6050_data.Acc_Z * mpu6050_data.Acc_Z);
-  
-  // 基于加速度计算方向 (简化显示)
-  float accelAngle = atan2(mpu6050_data.Acc_Y, mpu6050_data.Acc_X);
-  int accelLen = map(constrain(totalAccel, 8, 12), 8, 12, 5, 15); // 映射到箭头长度
-  
-  int accelEndX = centerX + accelLen * cos(accelAngle);
-  int accelEndY = centerY + accelLen * sin(accelAngle);
-  
-  // 绘制加速度矢量箭头
-  display.drawLine(centerX, centerY, accelEndX, accelEndY, SSD1306_WHITE);
-  display.drawLine(accelEndX, accelEndY, 
-                   accelEndX - 2 * cos(accelAngle - 0.5), 
-                   accelEndY - 2 * sin(accelAngle - 0.5), SSD1306_WHITE);
-  display.drawLine(accelEndX, accelEndY, 
-                   accelEndX - 2 * cos(accelAngle + 0.5), 
-                   accelEndY - 2 * sin(accelAngle + 0.5), SSD1306_WHITE);
-  
-  // 角速度指示器 (顶部三个小条)
-  int gyroBarY = 5;
-  int gyroBarWidth = 2;
-  int gyroBarMaxHeight = 10;
-  
-  // X轴角速度条
-  int gyroXHeight = map(constrain(abs(mpu6050_data.Angle_Velocity_R * 180/PI), 0, 100), 0, 100, 1, gyroBarMaxHeight);
-  display.fillRect(centerX - 20, gyroBarY + gyroBarMaxHeight - gyroXHeight, gyroBarWidth, gyroXHeight, SSD1306_WHITE);
-  display.setCursor(centerX - 22, gyroBarY + gyroBarMaxHeight + 2);
-  display.print("X");
-  q
-  // Y轴角速度条
-  int gyroYHeight = map(constrain(abs(mpu6050_data.Angle_Velocity_P * 180/PI), 0, 100), 0, 100, 1, gyroBarMaxHeight);
-  display.fillRect(centerX - 1, gyroBarY + gyroBarMaxHeight - gyroYHeight, gyroBarWidth, gyroYHeight, SSD1306_WHITE);
-  display.setCursor(centerX - 3, gyroBarY + gyroBarMaxHeight + 2);
-  display.print("Y");
-  
-  // Z轴角速度条
-  int gyroZHeight = map(constrain(abs(mpu6050_data.Angle_Velocity_Y * 180/PI), 0, 100), 0, 100, 1, gyroBarMaxHeight);
-  display.fillRect(centerX + 18, gyroBarY + gyroBarMaxHeight - gyroZHeight, gyroBarWidth, gyroZHeight, SSD1306_WHITE);
-  display.setCursor(centerX + 16, gyroBarY + gyroBarMaxHeight + 2);
-  display.print("Z");
-  
-  // 温度显示 (右上角)
-  display.setCursor(90, 0);
+  // 顶部显示基本数据 (温度和加速度)
+  display.setCursor(0, 0);
+  display.print("T:");
   display.print((int)mpu6050_data.Temperature);
-  display.print("C");
+  display.setCursor(35, 0);
+  display.print("G:");
+  display.print(sqrt(mpu6050_data.Acc_X_Filtered * mpu6050_data.Acc_X_Filtered + 
+                     mpu6050_data.Acc_Y_Filtered * mpu6050_data.Acc_Y_Filtered + 
+                     mpu6050_data.Acc_Z_Filtered * mpu6050_data.Acc_Z_Filtered), 1);
+  
+  // 3D立方体显示区域 (使用屏幕中心区域 32x32像素)
+  int centerX = 64;   // 屏幕中心X (128/2)
+  int centerY = 35;   // 屏幕中心Y (稍微下移)
+  
+  // 根据实际数据分析，传感器垂直安装时X轴承受主要重力
+  // X=10.25, Y=-0.5, Z=0.5 说明X轴垂直向下
+  // 重新校准：假设静止时X轴应该是-9.8 (向下)
+  float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;  // 校准偏移 (10.25-9.8)
+  float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;   // 校准Y轴偏移
+  float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.5;   // 校准Z轴偏移
+  
+  // 基于校正后的加速度计算倾斜角度
+  // 垂直安装：X轴向下为重力方向
+  float roll = -atan2(acc_z_corrected, acc_x_corrected) * 180.0 / PI;   // 绕Y轴转动(前后倾斜)
+  float pitch = atan2(acc_y_corrected, acc_x_corrected) * 180.0 / PI;   // 绕Z轴转动(左右倾斜)
+  float yaw = (mpu6050_data.Gyro_X_Filtered * 180/PI) * 0.1;            // X轴角速度积分
+  
+  // 角度限制和平滑处理
+  roll = constrain(roll, -90, 90);
+  pitch = constrain(pitch, -90, 90);
+  
+  // 转换为弧度
+  float rollRad = roll * PI / 180.0;
+  float pitchRad = pitch * PI / 180.0;
+  float yawRad = yaw * PI / 180.0;
+  
+  // 3D立方体的8个顶点 (相对坐标，边长14像素，稍小一点)
+  float vertices[8][3] = {
+    {-7, -7, -7}, {7, -7, -7}, {7, 7, -7}, {-7, 7, -7},  // 后面4个点
+    {-7, -7, 7},  {7, -7, 7},  {7, 7, 7},  {-7, 7, 7}   // 前面4个点
+  };
+  
+  // 旋转后的2D投影点
+  int projected[8][2];
+  
+  // 对每个顶点进行3D旋转和2D投影
+  for(int i = 0; i < 8; i++) {
+    float x = vertices[i][0];
+    float y = vertices[i][1]; 
+    float z = vertices[i][2];
+    
+    // 绕X轴旋转 (Roll) - 前后倾斜
+    float y1 = y * cos(rollRad) - z * sin(rollRad);
+    float z1 = y * sin(rollRad) + z * cos(rollRad);
+    
+    // 绕Y轴旋转 (Pitch) - 左右倾斜
+    float x2 = x * cos(pitchRad) + z1 * sin(pitchRad);
+    float z2 = -x * sin(pitchRad) + z1 * cos(pitchRad);
+    
+    // 绕Z轴旋转 (Yaw) - 水平转动
+    float x3 = x2 * cos(yawRad) - y1 * sin(yawRad);
+    float y3 = x2 * sin(yawRad) + y1 * cos(yawRad);
+    
+    // 简单透视投影
+    float distance = 40 + z2;  // 减小基础距离
+    if (distance < 10) distance = 10; // 防止除零
+    projected[i][0] = centerX + (x3 * 35) / distance;
+    projected[i][1] = centerY + (y3 * 35) / distance;
+  }
+  
+  // 绘制立方体的12条边
+  // 后面正方形的4条边 (0-1-2-3-0)
+  display.drawLine(projected[0][0], projected[0][1], projected[1][0], projected[1][1], SSD1306_WHITE);
+  display.drawLine(projected[1][0], projected[1][1], projected[2][0], projected[2][1], SSD1306_WHITE);
+  display.drawLine(projected[2][0], projected[2][1], projected[3][0], projected[3][1], SSD1306_WHITE);
+  display.drawLine(projected[3][0], projected[3][1], projected[0][0], projected[0][1], SSD1306_WHITE);
+  
+  // 前面正方形的4条边 (4-5-6-7-4)
+  display.drawLine(projected[4][0], projected[4][1], projected[5][0], projected[5][1], SSD1306_WHITE);
+  display.drawLine(projected[5][0], projected[5][1], projected[6][0], projected[6][1], SSD1306_WHITE);
+  display.drawLine(projected[6][0], projected[6][1], projected[7][0], projected[7][1], SSD1306_WHITE);
+  display.drawLine(projected[7][0], projected[7][1], projected[4][0], projected[4][1], SSD1306_WHITE);
+  
+  // 连接前后两个正方形的4条边
+  display.drawLine(projected[0][0], projected[0][1], projected[4][0], projected[4][1], SSD1306_WHITE);
+  display.drawLine(projected[1][0], projected[1][1], projected[5][0], projected[5][1], SSD1306_WHITE);
+  display.drawLine(projected[2][0], projected[2][1], projected[6][0], projected[6][1], SSD1306_WHITE);
+  display.drawLine(projected[3][0], projected[3][1], projected[7][0], projected[7][1], SSD1306_WHITE);
+  
+  // 底部显示校正后的角度数值
+  display.setCursor(0, 56);
+  display.print("R:");
+  display.print((int)roll);
+  display.setCursor(35, 56);
+  display.print("P:");
+  display.print((int)pitch);
+  display.setCursor(70, 56);
+  display.print("Y:");
+  display.print((int)yaw);
   
   display.display();
 }
@@ -340,18 +332,18 @@ void setup() {
   if (display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println("✓ OLED初始化成功");
     
-    // 显示启动画面
+    // 显示启动画面 - 使用纯ASCII字符
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
-    display.println("ESP32 IMU项目");
-    display.println("Adafruit MPU6050库");
+    display.println("ESP32 IMU");
+    display.println("MPU6050 + OLED");
     display.println("");
-    display.println("MPU6050: 已连接");
-    display.println("OLED:    已连接");
+    display.println("MPU6050: OK");
+    display.println("OLED:    OK");
     display.println("");
-    display.println("初始化完成!");
+    display.println("Ready!");
     display.display();
     
     delay(2000);

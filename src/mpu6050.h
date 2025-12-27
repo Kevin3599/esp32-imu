@@ -22,15 +22,27 @@ struct MPU6050_DATA
   double Pitch = 0.0;
   double Yaw = 0.0;
 
-  // 沿三轴的线加速度 米每二次方秒 m/s^2
+  // 沿三轴的线加速度 米每二次方秒 m/s^2 (原始数据)
   double Acc_X = 0.0;
   double Acc_Y = 0.0;
   double Acc_Z = 0.0;
 
-  // 三轴角速度 弧度每秒 rad/s
+  // 三轴角速度 弧度每秒 rad/s (原始数据)
   double Angle_Velocity_R = 0.0;  // Roll角速度
   double Angle_Velocity_P = 0.0;  // Pitch角速度
   double Angle_Velocity_Y = 0.0;  // Yaw角速度
+  
+  // 滤波后的数据 (适用于高震动环境)
+  double Acc_X_Filtered = 0.0;
+  double Acc_Y_Filtered = 0.0;
+  double Acc_Z_Filtered = 0.0;
+  
+  double Gyro_X_Filtered = 0.0;
+  double Gyro_Y_Filtered = 0.0;
+  double Gyro_Z_Filtered = 0.0;
+  
+  double Roll_Filtered = 0.0;
+  double Pitch_Filtered = 0.0;
 };
 
 // 全局MPU6050数据对象
@@ -53,6 +65,18 @@ void ReadMPU6050();
  * 基于加速度计数据计算倾斜角度
  */
 void CalculateAttitude();
+
+/**
+ * 高震动环境数据滤波
+ * 使用低通滤波器和均值滤波
+ */
+void FilterDataForVibration();
+
+/**
+ * 初始化高震动模式
+ * 设置更低的带宽和更强的滤波
+ */
+void InitHighVibrationMode();
 
 /**
  * 实时打印MPU6050数据到串口
