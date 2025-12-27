@@ -1,197 +1,65 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-    <title>ESP32 IMU Monitor</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            background: #f0f0f0; 
-        }
-        .container { 
-            max-width: 800px; 
-            margin: 0 auto; 
-            background: white; 
-            padding: 20px; 
-            border-radius: 10px; 
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-            margin-bottom: 30px;
-        }
-        .data-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-        .data-box { 
-            padding: 15px; 
-            border: 2px solid #4CAF50; 
-            border-radius: 8px; 
-            text-align: center; 
-            background: #f9fff9;
-        }
-        .data-value { 
-            font-size: 24px; 
-            font-weight: bold; 
-            color: #4CAF50; 
-            display: block;
-            margin-bottom: 5px;
-        }
-        .data-label { 
-            font-size: 12px; 
-            color: #666; 
-        }
-        #cube-container { 
-            width: 300px; 
-            height: 300px; 
-            margin: 20px auto; 
-            border: 1px solid #ddd; 
-            border-radius: 8px;
-            background: #fafafa;
-        }
-        .status {
-            text-align: center; 
-            color: #666; 
-            font-size: 12px;
-            margin-top: 20px;
-        }
-        .connection-status {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 8px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        .connected {
-            background: #4CAF50;
-            color: white;
-        }
-        .disconnected {
-            background: #f44336;
-            color: white;
-        }
-    </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP32 IMU</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px Arial,sans-serif;background:#667eea;color:#333;padding:10px}
+.c{max-width:400px;margin:0 auto;background:#fff;padding:20px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.3)}
+h1{text-align:center;margin-bottom:20px;font-size:20px}
+.s{display:flex;justify-content:space-between;background:#f0f0f0;padding:8px 12px;border-radius:5px;margin-bottom:15px;font-size:12px}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+.b{padding:12px;border:2px solid #28a745;border-radius:8px;text-align:center;background:#f9fff9}
+.v{font:bold 18px monospace;color:#28a745;display:block;margin-bottom:3px}
+.l{font-size:10px;color:#666;text-transform:uppercase}
+.cube{width:120px;height:120px;margin:20px auto;perspective:200px}
+.cb{width:60px;height:60px;margin:30px auto;transform-style:preserve-3d;transition:transform .1s}
+.f{position:absolute;width:60px;height:60px;border:1px solid #28a745;background:rgba(40,167,69,.1);display:flex;align-items:center;justify-content:center;font-size:10px;color:#28a745}
+.f1{transform:rotateY(0deg) translateZ(30px)}
+.f2{transform:rotateY(180deg) translateZ(30px)}
+.f3{transform:rotateY(90deg) translateZ(30px)}
+.f4{transform:rotateY(-90deg) translateZ(30px)}
+.f5{transform:rotateX(90deg) translateZ(30px)}
+.f6{transform:rotateX(-90deg) translateZ(30px)}
+.foot{text-align:center;font-size:10px;color:#666;margin-top:15px;border-top:1px solid #eee;padding-top:10px}
+.err{background:#f8d7da;color:#721c24;padding:8px;border-radius:4px;margin:8px 0;font-size:11px;display:none}
+</style>
 </head>
 <body>
-    <div class="connection-status" id="status">连接中...</div>
-    
-    <div class="container">
-        <h1>🎯 ESP32 IMU 实时监控</h1>
-        
-        <div class="data-grid">
-            <div class="data-box">
-                <span class="data-value" id="temp">--</span>
-                <div class="data-label">温度 (°C)</div>
-            </div>
-            <div class="data-box">
-                <span class="data-value" id="gravity">--</span>
-                <div class="data-label">重力 (m/s²)</div>
-            </div>
-            <div class="data-box">
-                <span class="data-value" id="roll">--</span>
-                <div class="data-label">Roll (°)</div>
-            </div>
-            <div class="data-box">
-                <span class="data-value" id="pitch">--</span>
-                <div class="data-label">Pitch (°)</div>
-            </div>
-            <div class="data-box">
-                <span class="data-value" id="yaw">--</span>
-                <div class="data-label">Yaw (°)</div>
-            </div>
-        </div>
-
-        <div id="cube-container"></div>
-        
-        <div class="status">
-            数据更新频率: 10Hz | 滤波: 启用 | 传感器: MPU6050
-        </div>
-    </div>
-
-    <script>
-        // Three.js 3D立方体
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(300, 300);
-        renderer.setClearColor(0xfafafa);
-        document.getElementById('cube-container').appendChild(renderer.domElement);
-
-        // 创建立方体
-        const geometry = new THREE.BoxGeometry(2, 2, 2);
-        const edges = new THREE.EdgesGeometry(geometry);
-        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x4CAF50, linewidth: 2 }));
-        scene.add(line);
-
-        // 添加坐标轴
-        const axesHelper = new THREE.AxesHelper(3);
-        scene.add(axesHelper);
-
-        // 添加网格地面
-        const gridHelper = new THREE.GridHelper(4, 8, 0xcccccc, 0xeeeeee);
-        gridHelper.position.y = -2;
-        scene.add(gridHelper);
-
-        camera.position.set(4, 4, 4);
-        camera.lookAt(0, 0, 0);
-
-        // 动画循环
-        function animate() {
-            requestAnimationFrame(animate);
-            renderer.render(scene, camera);
-        }
-        animate();
-
-        // 连接状态管理
-        let isConnected = false;
-        const statusEl = document.getElementById('status');
-
-        function updateConnectionStatus(connected) {
-            isConnected = connected;
-            statusEl.className = 'connection-status ' + (connected ? 'connected' : 'disconnected');
-            statusEl.textContent = connected ? '已连接' : '连接断开';
-        }
-
-        // 获取数据并更新显示
-        function updateData() {
-            fetch('/data')
-                .then(response => {
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    return response.json();
-                })
-                .then(data => {
-                    // 更新连接状态
-                    updateConnectionStatus(true);
-                    
-                    // 更新数据显示
-                    document.getElementById('temp').textContent = data.temp;
-                    document.getElementById('gravity').textContent = data.gravity;
-                    document.getElementById('roll').textContent = data.roll;
-                    document.getElementById('pitch').textContent = data.pitch;
-                    document.getElementById('yaw').textContent = data.yaw;
-                    
-                    // 更新3D立方体姿态
-                    line.rotation.x = data.roll * Math.PI / 180;
-                    line.rotation.y = data.pitch * Math.PI / 180;
-                    line.rotation.z = data.yaw * Math.PI / 180 * 0.1;
-                })
-                .catch(error => {
-                    console.log('数据获取失败:', error);
-                    updateConnectionStatus(false);
-                });
-        }
-
-        // 每100ms更新一次数据
-        setInterval(updateData, 100);
-        updateData(); // 立即更新一次
-    </script>
+<div class="c">
+<h1>🎯 ESP32 IMU</h1>
+<div class="s">
+<div id="st">连接中...</div>
+<div id="tm">等待数据...</div>
+</div>
+<div class="err" id="err"></div>
+<div class="g">
+<div class="b"><span class="v" id="t">--</span><div class="l">温度(°C)</div></div>
+<div class="b"><span class="v" id="g">--</span><div class="l">重力(m/s²)</div></div>
+<div class="b"><span class="v" id="r">--</span><div class="l">Roll(°)</div></div>
+<div class="b"><span class="v" id="p">--</span><div class="l">Pitch(°)</div></div>
+</div>
+<div class="cube">
+<div class="cb" id="cb">
+<div class="f f1">前</div>
+<div class="f f2">后</div>
+<div class="f f3">右</div>
+<div class="f f4">左</div>
+<div class="f f5">上</div>
+<div class="f f6">下</div>
+</div>
+</div>
+<div class="foot">实时监控 | 5Hz | MPU6050</div>
+</div>
+<script>
+let c=0,e=5,st=document.getElementById('st'),tm=document.getElementById('tm'),er=document.getElementById('err'),cb=document.getElementById('cb');
+function se(m){er.textContent=m;er.style.display='block';setTimeout(()=>er.style.display='none',2000)}
+function us(ok){c=ok?0:c+1;st.textContent=ok?'✅连接':'❌断开';st.style.color=ok?'#28a745':'#dc3545';if(ok)tm.textContent=new Date().toLocaleTimeString('zh-CN')}
+function uc(r,p,y){cb.style.transform=`rotateX(${(r||0)*0.017}rad) rotateY(${(p||0)*0.017}rad) rotateZ(${(y||0)*0.017}rad)`}
+function ud(){fetch('/data').then(r=>{if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}).then(d=>{us(1);document.getElementById('t').textContent=d.temp||'--';document.getElementById('g').textContent=d.gravity||'--';document.getElementById('r').textContent=d.roll||'--';document.getElementById('p').textContent=d.pitch||'--';uc(parseFloat(d.roll)||0,parseFloat(d.pitch)||0,parseFloat(d.yaw)||0)}).catch(x=>{console.error(x);us(0);c<=e&&se(`连接错误(${c}/${e}): ${x.message}`)})}
+ud();setInterval(ud,200);
+</script>
 </body>
 </html>

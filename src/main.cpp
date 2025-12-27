@@ -83,9 +83,14 @@ void scanI2CDevices();
 void handleRoot() {
     File file = SPIFFS.open("/index.html", "r");
     if (!file) {
-        server.send(404, "text/plain", "HTML file not found!");
+        server.send(404, "text/plain", "HTML file not found! Please upload SPIFFS files first.");
         return;
     }
+    
+    // 添加HTTP缓存头和keep-alive
+    server.sendHeader("Cache-Control", "public, max-age=300"); // 5分钟缓存
+    server.sendHeader("Connection", "keep-alive");
+    server.sendHeader("Content-Encoding", "identity");
     
     server.streamFile(file, "text/html");
     file.close();
@@ -106,7 +111,7 @@ void handleData() {
     float yaw = (mpu6050_data.Gyro_X_Filtered * 180/PI) * 0.1;
     
     // 构建JSON响应
-    char json_buffer[200];
+    char json_buffer[120];
     sprintf(json_buffer, 
         "{\"temp\":%d,\"gravity\":%.1f,\"roll\":%d,\"pitch\":%d,\"yaw\":%d}",
         (int)mpu6050_data.Temperature,
@@ -115,6 +120,10 @@ void handleData() {
         (int)pitch,
         (int)yaw
     );
+    
+    // 优化的HTTP头
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    server.sendHeader("Connection", "keep-alive");
     
     server.send(200, "application/json", json_buffer);
 }
