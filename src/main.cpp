@@ -24,6 +24,8 @@
 #include <WebServer.h>
 #include <SPIFFS.h>
 #include "mpu6050.h"
+#include "gps_module.h"
+#include "performance_analyzer.h"
 
 // I²C双路总线引脚定义
 // I2C0 - MPU6050传感器
@@ -54,7 +56,7 @@ const char* ap_password = "12345678";
 // Web服务器
 WebServer server(80);
 
-// 显示模式：0=IMU数据, 1=二维码
+// 显示模式：0=IMU数据, 1=二维码, 2=GPS数据, 3=性能数据
 int display_mode = 1;
 
 // 定时变量
@@ -72,6 +74,8 @@ int printMode = 2;
 
 // 函数声明
 void updateDisplay();
+void displayGPSData();
+void displayPerformanceData();
 void printDataToSerial();
 void handleSerialCommands();
 void scanI2CDevices();
@@ -97,28 +101,62 @@ void handleRoot() {
 }
 
 void handleData() {
-    // 重新计算校正后的数据（与显示函数保持一致）
-    float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;
-    float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;
-    float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;
+    // 重新计算校正后的数据（垂直安装校准）
+    float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;  // X轴垂直向下，校正偏移
+    float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;   // Y轴水平，校正偏移  
+    float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;  // Z轴水平，校正偏移
     
     float corrected_total_accel = sqrt(acc_x_corrected * acc_x_corrected + 
                                       acc_y_corrected * acc_y_corrected + 
                                       acc_z_corrected * acc_z_corrected);
     
-    float roll = -atan2(acc_z_corrected, acc_x_corrected) * 180.0 / PI + 1.0;
-    float pitch = atan2(acc_y_corrected, acc_x_corrected) * 180.0 / PI;
-    float yaw = (mpu6050_data.Gyro_X_Filtered * 180/PI) * 0.1;
+    float roll = atan2(acc_z_corrected, acc_x_corrected) * 180.0 / PI + 2.0;    // 补偿+2度偏移（原-3度）
+    float pitch = atan2(acc_y_corrected, acc_x_corrected) * 180.0 / PI;          // Pitch保持不变
+    float yaw = (mpu6050_data.Gyro_X_Filtered * 180/PI) * 0.1;                   // X轴陀螺仪
     
-    // 构建JSON响应
-    char json_buffer[120];
+    // 构建包含GPS和性能数据的完整JSON响应
+    char json_buffer[500];
     sprintf(json_buffer, 
-        "{\"temp\":%d,\"gravity\":%.1f,\"roll\":%d,\"pitch\":%d,\"yaw\":%d}",
+        "{"
+        "\"temp\":%d,"
+        "\"gravity\":%.1f,"
+        "\"roll\":%d,"
+        "\"pitch\":%d,"
+        "\"yaw\":%d,"
+        "\"gps\":{"
+            "\"speed\":%.1f,"
+            "\"maxSpeed\":%.1f,"
+            "\"satellites\":%d,"
+            "\"valid\":%s"
+        "},"
+        "\"performance\":{"
+            "\"accelG\":%.2f,"
+            "\"lateralG\":%.2f,"
+            "\"accel0to100\":%.2f,"
+            "\"brake100to0\":%.2f,"
+            "\"maxAccelG\":%.2f,"
+            "\"maxBrakeG\":%.2f,"
+            "\"maxLateralG\":%.2f,"
+            "\"power\":%.1f"
+        "}"
+        "}",
         (int)mpu6050_data.Temperature,
         corrected_total_accel,
         (int)roll,
         (int)pitch,
-        (int)yaw
+        (int)yaw,
+        gps_data.speed_kmh,
+        gps_data.max_speed_session,
+        gps_data.satellites,
+        gps_data.valid_location ? "true" : "false",
+        fused_data.current_accel_g,
+        fused_data.current_lateral_g,
+        performance_data.accel_0_100_time,
+        performance_data.brake_100_0_time,
+        fused_data.session_max_accel_g,
+        fused_data.session_max_brake_g,
+        fused_data.session_max_lateral_g,
+        fused_data.instantaneous_power_estimate
     );
     
     // 优化的HTTP头
@@ -158,9 +196,10 @@ void updateDisplay() {
   // 根据实际数据分析，传感器垂直安装时X轴承受主要重力
   // X=10.25, Y=-0.5, Z=0.5 说明X轴垂直向下
   // 重新校准：假设静止时X轴应该是-9.8 (向下)
+  // 垂直安装校准参数
   float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;  // 校准偏移 (10.25-9.8)
   float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;   // 校准Y轴偏移
-  float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;  // 微调Z轴偏移，消除Roll的-1度偏移
+  float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;  // 微调Z轴偏移
   
   // 计算校正后的合成加速度
   float corrected_total_accel = sqrt(acc_x_corrected * acc_x_corrected + 
@@ -179,11 +218,11 @@ void updateDisplay() {
   int centerX = 64;   // 屏幕中心X (128/2)
   int centerY = 35;   // 屏幕中心Y (稍微下移)
   
-  // 基于校正后的加速度计算倾斜角度
+  // 基于校正后的加速度计算倾斜角度  
   // 垂直安装：X轴向下为重力方向
-  float roll = -atan2(acc_z_corrected, acc_x_corrected) * 180.0 / PI + 1.0;   // 绕Y轴转动(前后倾斜) + 补偿1度偏移
-  float pitch = atan2(acc_y_corrected, acc_x_corrected) * 180.0 / PI;   // 绕Z轴转动(左右倾斜)
-  float yaw = (mpu6050_data.Gyro_X_Filtered * 180/PI) * 0.1;            // X轴角速度积分
+  float roll = atan2(acc_z_corrected, acc_x_corrected) * 180.0 / PI + 2.0;    // 补偿+2度偏移（消除-3度）
+  float pitch = atan2(acc_y_corrected, acc_x_corrected) * 180.0 / PI;         // 绕Z轴转动（左右倾斜）
+  float yaw = (mpu6050_data.Gyro_X_Filtered * 180/PI) * 0.1;                  // X轴角速度积分
   
   // 角度限制和平滑处理
   roll = constrain(roll, -90, 90);
@@ -272,6 +311,8 @@ void printDataToSerial() {
     case 0: // 简要模式 - 高频率简洁输出
       if (currentTime - lastPrintTime >= PRINT_INTERVAL) {
         PrintMPU6050DataBrief();
+        printGPSData();
+        printFusedData();
         lastPrintTime = currentTime;
       }
       break;
@@ -279,6 +320,8 @@ void printDataToSerial() {
     case 1: // 详细模式 - 低频率详细输出
       if (currentTime - lastDetailedPrintTime >= DETAILED_PRINT_INTERVAL) {
         PrintMPU6050Data();
+        printGPSData();
+        printFusedData();
         lastDetailedPrintTime = currentTime;
       }
       break;
@@ -293,6 +336,8 @@ void printDataToSerial() {
       // 每2秒详细输出
       if (currentTime - lastDetailedPrintTime >= DETAILED_PRINT_INTERVAL) {
         PrintMPU6050Data();
+        printGPSData();
+        printFusedData();
         lastDetailedPrintTime = currentTime;
       }
       break;
@@ -417,6 +462,14 @@ void setup() {
   Serial.println("初始化MPU6050传感器...");
   Init_mpu6050();
   
+  // 初始化GPS模块
+  Serial.println("初始化GPS模块...");
+  initGPS();
+  
+  // 初始化性能分析器
+  Serial.println("初始化性能分析器...");
+  initPerformanceAnalyzer();
+  
   // 初始化OLED显示屏
   Serial.println("初始化OLED显示屏...");
   if (display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
@@ -496,7 +549,7 @@ void loop() {
   static bool lastBootState = HIGH;
   bool currentBootState = digitalRead(0);
   if (lastBootState == HIGH && currentBootState == LOW) {
-    display_mode = 1 - display_mode; // 切换显示模式
+    display_mode = (display_mode + 1) % 4; // 切换显示模式: 0=IMU, 1=二维码, 2=GPS, 3=性能
     delay(200); // 防抖
   }
   lastBootState = currentBootState;
@@ -507,16 +560,102 @@ void loop() {
   // 定时更新数据和显示
   if (currentTime - lastUpdateTime >= UPDATE_INTERVAL) {
     ReadMPU6050();  // 使用Adafruit库读取MPU6050数据
+    updateGPSData(); // 更新GPS数据
+    updateFusedData(); // 更新融合性能数据
     
     // 根据显示模式选择显示内容
     if (display_mode == 0) {
       updateDisplay();  // 显示IMU数据
-    } else {
+    } else if (display_mode == 1) {
       displayQRCode();  // 显示二维码
+    } else if (display_mode == 2) {
+      displayGPSData(); // 显示GPS数据
+    } else if (display_mode == 3) {
+      displayPerformanceData(); // 显示性能数据
     }
     
     printDataToSerial();
     
     lastUpdateTime = currentTime;
   }
+}
+
+/**
+ * 显示GPS数据
+ */
+void displayGPSData() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  
+  display.setCursor(0, 0);
+  display.println("=== GPS STATUS ===");
+  
+  // 显示卫星和信号质量
+  display.printf("Sats: %d HDOP: %.1f\n", gps_data.satellites, gps_data.hdop);
+  
+  // 显示速度信息
+  if (gps_data.valid_speed) {
+    display.printf("Speed: %.1f km/h\n", gps_data.speed_kmh);
+    display.printf("Max: %.1f km/h\n", gps_data.max_speed_session);
+  } else {
+    display.println("Speed: No Fix");
+  }
+  
+  // 显示位置信息
+  if (gps_data.valid_location) {
+    display.printf("Lat: %.4f\n", gps_data.latitude);
+    display.printf("Lon: %.4f\n", gps_data.longitude);
+  } else {
+    display.println("Location: No Fix");
+  }
+  
+  // 显示时间
+  if (gps_data.valid_time) {
+    display.printf("Time: %02d:%02d:%02d\n", 
+                   gps_data.hour, gps_data.minute, gps_data.second);
+  }
+  
+  display.display();
+}
+
+/**
+ * 显示性能数据
+ */
+void displayPerformanceData() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  
+  display.setCursor(0, 0);
+  display.println("=== PERFORMANCE ===");
+  
+  // 显示当前状态
+  display.printf("Speed: %.1f km/h\n", fused_data.current_speed_kmh);
+  display.printf("Accel: %.2fG ", fused_data.current_accel_g);
+  display.printf("Lat: %.2fG\n", fused_data.current_lateral_g);
+  
+  // 显示状态指示
+  display.print("Status: ");
+  if (fused_data.is_accelerating) display.print("ACC ");
+  if (fused_data.is_braking) display.print("BRK ");
+  if (fused_data.is_cornering) display.print("COR");
+  display.println();
+  
+  // 显示测试结果
+  if (performance_data.accel_0_100_time > 0) {
+    display.printf("0-100: %.2fs\n", performance_data.accel_0_100_time);
+  }
+  
+  if (performance_data.brake_100_0_time > 0) {
+    display.printf("100-0: %.2fs\n", performance_data.brake_100_0_time);
+  }
+  
+  // 显示峰值数据
+  display.printf("Max G: +%.1f/%.1f/%.1f\n", 
+                fused_data.session_max_accel_g,
+                fused_data.session_max_brake_g,
+                fused_data.session_max_lateral_g);
+  
+  display.display();
 }

@@ -3,16 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ESP32 IMU</title>
+<title>ESP32 Draggy Performance Logger</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font:14px Arial,sans-serif;background:#667eea;color:#333;padding:10px}
-.c{max-width:400px;margin:0 auto;background:#fff;padding:20px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.3)}
-h1{text-align:center;margin-bottom:20px;font-size:20px}
+.c{max-width:480px;margin:0 auto;background:#fff;padding:20px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.3)}
+h1{text-align:center;margin-bottom:20px;font-size:22px;color:#333}
 .s{display:flex;justify-content:space-between;background:#f0f0f0;padding:8px 12px;border-radius:5px;margin-bottom:15px;font-size:12px}
+.tabs{display:flex;margin-bottom:20px;border-radius:8px;overflow:hidden;background:#e9ecef}
+.tab{flex:1;padding:10px;text-align:center;cursor:pointer;background:#e9ecef;border:none;font-size:12px;transition:all .2s}
+.tab.active{background:#28a745;color:white}
+.tab:hover:not(.active){background:#dee2e6}
+.section{display:none}
+.section.active{display:block}
 .g{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:20px}
 .b{padding:12px;border:2px solid #28a745;border-radius:8px;text-align:center;background:#f9fff9}
-.v{font:bold 18px monospace;color:#28a745;display:block;margin-bottom:3px}
+.b.gps{border-color:#007bff;background:#f8f9ff}
+.b.perf{border-color:#fd7e14;background:#fff8f0}
+.v{font:bold 16px monospace;color:#28a745;display:block;margin-bottom:3px}
+.v.gps{color:#007bff}
+.v.perf{color:#fd7e14}
+.v.big{font-size:20px}
 .l{font-size:10px;color:#666;text-transform:uppercase}
 .cube{width:120px;height:120px;margin:20px auto;perspective:200px}
 .cb{width:60px;height:60px;margin:30px auto;transform-style:preserve-3d;transition:transform .1s}
@@ -25,16 +37,30 @@ h1{text-align:center;margin-bottom:20px;font-size:20px}
 .f6{transform:rotateX(-90deg) translateZ(30px)}
 .foot{text-align:center;font-size:10px;color:#666;margin-top:15px;border-top:1px solid #eee;padding-top:10px}
 .err{background:#f8d7da;color:#721c24;padding:8px;border-radius:4px;margin:8px 0;font-size:11px;display:none}
+.status{padding:5px 10px;border-radius:15px;font-size:11px;margin:2px;display:inline-block}
+.status.acc{background:#28a745;color:white}
+.status.brk{background:#dc3545;color:white}
+.status.cor{background:#ffc107;color:#000}
 </style>
 </head>
 <body>
 <div class="c">
-<h1>🎯 ESP32 IMU</h1>
+<h1>🏁 ESP32 Draggy</h1>
 <div class="s">
 <div id="st">连接中...</div>
 <div id="tm">等待数据...</div>
 </div>
+
+<div class="tabs">
+<button class="tab active" onclick="showTab('imu')">IMU</button>
+<button class="tab" onclick="showTab('gps')">GPS</button>
+<button class="tab" onclick="showTab('perf')">性能</button>
+</div>
+
 <div class="err" id="err"></div>
+
+<!-- IMU数据页面 -->
+<div class="section active" id="imu">
 <div class="g">
 <div class="b"><span class="v" id="t">--</span><div class="l">温度(°C)</div></div>
 <div class="b"><span class="v" id="g">--</span><div class="l">重力(m/s²)</div></div>
@@ -48,6 +74,110 @@ h1{text-align:center;margin-bottom:20px;font-size:20px}
 <div class="f f3">右</div>
 <div class="f f4">左</div>
 <div class="f f5">上</div>
+<div class="f f6">下</div>
+</div>
+</div>
+</div>
+
+<!-- GPS数据页面 -->
+<div class="section" id="gps">
+<div class="g">
+<div class="b gps"><span class="v gps big" id="speed">--</span><div class="l">当前速度(km/h)</div></div>
+<div class="b gps"><span class="v gps" id="maxSpeed">--</span><div class="l">最高速度(km/h)</div></div>
+<div class="b gps"><span class="v gps" id="sats">--</span><div class="l">卫星数量</div></div>
+<div class="b gps"><span class="v gps" id="gpsStatus">--</span><div class="l">GPS状态</div></div>
+</div>
+</div>
+
+<!-- 性能数据页面 -->
+<div class="section" id="perf">
+<div class="g3">
+<div class="b perf"><span class="v perf" id="accelG">--</span><div class="l">加速度G</div></div>
+<div class="b perf"><span class="v perf" id="lateralG">--</span><div class="l">横向G</div></div>
+<div class="b perf"><span class="v perf" id="power">--</span><div class="l">功率(kW)</div></div>
+</div>
+<div class="g">
+<div class="b perf"><span class="v perf" id="accel100">--</span><div class="l">0-100km/h(秒)</div></div>
+<div class="b perf"><span class="v perf" id="brake100">--</span><div class="l">100-0制动(秒)</div></div>
+</div>
+<div class="g3">
+<div class="b perf"><span class="v perf" id="maxAccelG">--</span><div class="l">最大加速G</div></div>
+<div class="b perf"><span class="v perf" id="maxBrakeG">--</span><div class="l">最大制动G</div></div>
+<div class="b perf"><span class="v perf" id="maxLateralG">--</span><div class="l">最大横向G</div></div>
+</div>
+<div id="statusArea" style="margin-top:10px;text-align:center"></div>
+</div>
+
+<div class="foot">ESP32 Draggy Performance Logger v1.0</div>
+</div>
+
+<script>
+let currentTab = 'imu';
+
+function showTab(tab) {
+document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+document.querySelector(`.tab[onclick="showTab('${tab}')"]`).classList.add('active');
+document.getElementById(tab).classList.add('active');
+currentTab = tab;
+}
+
+function updateData() {
+fetch('/data')
+.then(r => r.json())
+.then(d => {
+document.getElementById('st').textContent = '在线';
+document.getElementById('tm').textContent = new Date().toLocaleTimeString();
+document.getElementById('err').style.display = 'none';
+
+// IMU数据
+document.getElementById('t').textContent = d.temp;
+document.getElementById('g').textContent = d.gravity;
+document.getElementById('r').textContent = d.roll;
+document.getElementById('p').textContent = d.pitch;
+
+// GPS数据
+if(d.gps) {
+document.getElementById('speed').textContent = d.gps.speed.toFixed(1);
+document.getElementById('maxSpeed').textContent = d.gps.maxSpeed.toFixed(1);
+document.getElementById('sats').textContent = d.gps.satellites;
+document.getElementById('gpsStatus').textContent = d.gps.valid ? '已定位' : '搜星中';
+}
+
+// 性能数据
+if(d.performance) {
+document.getElementById('accelG').textContent = d.performance.accelG.toFixed(2);
+document.getElementById('lateralG').textContent = d.performance.lateralG.toFixed(2);
+document.getElementById('power').textContent = d.performance.power.toFixed(1);
+document.getElementById('accel100').textContent = d.performance.accel0to100 > 0 ? d.performance.accel0to100.toFixed(2) : '--';
+document.getElementById('brake100').textContent = d.performance.brake100to0 > 0 ? d.performance.brake100to0.toFixed(2) : '--';
+document.getElementById('maxAccelG').textContent = d.performance.maxAccelG.toFixed(2);
+document.getElementById('maxBrakeG').textContent = d.performance.maxBrakeG.toFixed(2);
+document.getElementById('maxLateralG').textContent = d.performance.maxLateralG.toFixed(2);
+
+// 状态指示
+let status = '';
+if(d.performance.accelG > 0.1) status += '<span class="status acc">加速</span>';
+if(d.performance.accelG < -0.1) status += '<span class="status brk">制动</span>';
+if(Math.abs(d.performance.lateralG) > 0.1) status += '<span class="status cor">转弯</span>';
+document.getElementById('statusArea').innerHTML = status || '<span style="color:#666">稳定</span>';
+}
+
+// 3D立方体
+document.getElementById('cb').style.transform = `rotateX(${d.pitch}deg) rotateZ(${d.roll}deg)`;
+})
+.catch(() => {
+document.getElementById('st').textContent = '离线';
+document.getElementById('err').textContent = '连接失败，请检查网络';
+document.getElementById('err').style.display = 'block';
+});
+}
+
+setInterval(updateData, 200);
+updateData();
+</script>
+</body>
+</html>
 <div class="f f6">下</div>
 </div>
 </div>
