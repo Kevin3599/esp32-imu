@@ -59,9 +59,15 @@ WebServer server(80);
 // 显示模式：0=IMU数据, 1=二维码, 2=GPS数据, 3=性能数据
 int display_mode = 1;
 
-// 定时变量
+// ===== Dragy模式定时配置 =====
 unsigned long lastUpdateTime = 0;
-const unsigned long UPDATE_INTERVAL = 100; // 100ms更新间隔
+const unsigned long UPDATE_INTERVAL = 50;      // 50ms显示更新(20Hz)
+
+unsigned long lastIMUTime = 0;
+const unsigned long IMU_INTERVAL = 5;          // 5ms IMU采样(200Hz) - 用于GPS-IMU融合
+
+unsigned long lastGPSTime = 0;
+const unsigned long GPS_INTERVAL = 100;        // 100ms GPS处理(10Hz)
 
 // 串口打印配置
 unsigned long lastPrintTime = 0;
@@ -101,54 +107,87 @@ void handleRoot() {
 }
 
 void handleData() {
-    // 重新计算校正后的数据（垂直安装校准）
-    float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;  // X轴垂直向下，校正偏移
-    float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;   // Y轴水平，校正偏移  
-    float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;  // Z轴水平，校正偏移
+    // 简化数据处理 - 减少计算负载
+    float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;
+    float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;
+    float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;
     
-    float corrected_total_accel = sqrt(acc_x_corrected * acc_x_corrected + 
-                                      acc_y_corrected * acc_y_corrected + 
-                                      acc_z_corrected * acc_z_corrected);
+    // 简化角度计算
+    float roll = atan2(acc_z_corrected, acc_x_corrected) * 57.2958;  // 57.2958 = 180/PI
+    float pitch = atan2(acc_y_corrected, acc_x_corrected) * 57.2958;
     
-    float roll = atan2(acc_z_corrected, acc_x_corrected) * 180.0 / PI + 2.0;    // 补偿+2度偏移（原-3度）
-    float pitch = atan2(acc_y_corrected, acc_x_corrected) * 180.0 / PI;          // Pitch保持不变
-    float yaw = (mpu6050_data.Gyro_X_Filtered * 180/PI) * 0.1;                   // X轴陀螺仪
+    // 简单滤波 - 只在必要时使用
+    static float prev_roll = 0.0, prev_pitch = 0.0;
+    static bool first_run = true;
     
-    // 构建包含GPS和性能数据的完整JSON响应
-    char json_buffer[500];
+    if (!first_run) {
+        // 简单的均值滤波
+        roll = (prev_roll + roll) * 0.5;
+        pitch = (prev_pitch + pitch) * 0.5;
+    }
+    first_run = false;
+    prev_roll = roll;
+    prev_pitch = pitch;
+    
+    // 构建高精度JSON响应 - 最大化性能
+    char json_buffer[750];
+    
+    // 高精度GPS数据验证
+    double safe_lat = (gps_data.valid_location && gps_data.satellites >= 6) ? gps_data.latitude : 0.0;
+    double safe_lon = (gps_data.valid_location && gps_data.satellites >= 6) ? gps_data.longitude : 0.0;
+    double safe_speed = (gps_data.valid_speed && gps_data.satellites >= 6) ? gps_data.speed_kmh : 0.0;
+    
+    // 高精度数据输出
     sprintf(json_buffer, 
         "{"
         "\"temp\":%d,"
-        "\"gravity\":%.1f,"
+        "\"gravity\":%.3f,"
         "\"roll\":%d,"
         "\"pitch\":%d,"
-        "\"yaw\":%d,"
         "\"gps\":{"
-            "\"speed\":%.1f,"
-            "\"maxSpeed\":%.1f,"
+            "\"speed\":%.2f,"
+            "\"rawGPSSpeed\":%.2f,"
+            "\"imuSpeed\":%.2f,"
+            "\"speedConfidence\":%.2f,"
+            "\"maxSpeed\":%.2f,"
             "\"satellites\":%d,"
-            "\"valid\":%s"
+            "\"valid\":%s,"
+            "\"latitude\":%.8f,"
+            "\"longitude\":%.8f,"
+            "\"altitude\":%.2f,"
+            "\"hdop\":%.3f,"
+            "\"course\":%.1f,"
+            "\"accuracy\":%.2f"
         "},"
         "\"performance\":{"
-            "\"accelG\":%.2f,"
-            "\"lateralG\":%.2f,"
+            "\"accelG\":%.4f,"
+            "\"lateralG\":%.4f,"
             "\"accel0to100\":%.2f,"
             "\"brake100to0\":%.2f,"
-            "\"maxAccelG\":%.2f,"
-            "\"maxBrakeG\":%.2f,"
-            "\"maxLateralG\":%.2f,"
-            "\"power\":%.1f"
+            "\"maxAccelG\":%.4f,"
+            "\"maxBrakeG\":%.4f,"
+            "\"maxLateralG\":%.4f,"
+            "\"power\":%.2f,"
+            "\"confidence\":%.2f"
         "}"
         "}",
         (int)mpu6050_data.Temperature,
-        corrected_total_accel,
+        sqrt(acc_x_corrected*acc_x_corrected + acc_y_corrected*acc_y_corrected + acc_z_corrected*acc_z_corrected),
         (int)roll,
         (int)pitch,
-        (int)yaw,
-        gps_data.speed_kmh,
+        safe_speed,                 // 融合后的最终速度
+        gps_data.speed_kmh,         // 原GPS速度
+        0.0,                        // IMU积分速度(暂未实现)
+        100.0,                      // 速度可信度(默认100%)
         gps_data.max_speed_session,
         gps_data.satellites,
-        gps_data.valid_location ? "true" : "false",
+        (gps_data.valid_location && gps_data.satellites >= 6) ? "true" : "false",
+        safe_lat,
+        safe_lon,
+        gps_data.altitude,
+        gps_data.hdop,
+        gps_data.course,
+        gps_data.position_accuracy,
         fused_data.current_accel_g,
         fused_data.current_lateral_g,
         performance_data.accel_0_100_time,
@@ -156,7 +195,8 @@ void handleData() {
         fused_data.session_max_accel_g,
         fused_data.session_max_brake_g,
         fused_data.session_max_lateral_g,
-        fused_data.instantaneous_power_estimate
+        fused_data.instantaneous_power_estimate,
+        (gps_data.satellites >= 8 && gps_data.hdop < 1.5) ? 1.0 : 0.6
     );
     
     // 优化的HTTP头
@@ -557,10 +597,25 @@ void loop() {
   // 处理串口命令
   handleSerialCommands();
   
-  // 定时更新数据和显示
+  // ===== 高频IMU采样 (200Hz) - Dragy模式关键 =====
+  if (currentTime - lastIMUTime >= IMU_INTERVAL) {
+    ReadMPU6050();  // 200Hz读取IMU数据
+    
+    // GPS-IMU速度融合 (每次IMU采样都进行)
+    double dt = IMU_INTERVAL / 1000.0; // 转换为秒
+    fuseIMUSpeed(mpu6050_data.Acc_X, mpu6050_data.Acc_Y, dt);
+    
+    lastIMUTime = currentTime;
+  }
+  
+  // ===== GPS数据处理 (10Hz) =====
+  if (currentTime - lastGPSTime >= GPS_INTERVAL) {
+    updateGPSData(); // 10Hz更新GPS数据
+    lastGPSTime = currentTime;
+  }
+  
+  // ===== 显示和融合更新 (20Hz) =====
   if (currentTime - lastUpdateTime >= UPDATE_INTERVAL) {
-    ReadMPU6050();  // 使用Adafruit库读取MPU6050数据
-    updateGPSData(); // 更新GPS数据
     updateFusedData(); // 更新融合性能数据
     
     // 根据显示模式选择显示内容

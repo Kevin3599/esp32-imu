@@ -110,10 +110,11 @@ void Init_mpu6050()
       getFilterBandwidth()
       setFilterBandwidth()
   ***********************************************/
-  // 高震动环境使用最低带宽滤波
-  mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
+  // Dragy模式：使用94Hz带宽，支持~200Hz采样率用于GPS-IMU融合
+  // 软件滤波会处理噪声，硬件需要保持足够的响应速度
+  mpu.setFilterBandwidth(MPU6050_BAND_94_HZ);
   
-  Serial.println("✅ MPU6050 configuration completed (High Vibration Mode)");
+  Serial.println("✅ MPU6050 configuration completed (Dragy Mode - 94Hz BW)");
   
   // 初始化高震动滤波
   InitHighVibrationMode();

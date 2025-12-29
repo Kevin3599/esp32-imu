@@ -99,38 +99,133 @@ void updateFusedData() {
  * 计算G力
  */
 void calculateGForces() {
-    // 获取校准后的IMU数据
-    double acc_x = mpu6050_data.Acc_X_Filtered - 0.47;  // 纵向加速度 (前后)
-    double acc_y = mpu6050_data.Acc_Y_Filtered + 0.5;   // 横向加速度 (左右)
-    double acc_z = mpu6050_data.Acc_Z_Filtered - 0.48;  // 垂直加速度 (上下)
+    // 获取精密校准的IMU数据
+    double acc_x = mpu6050_data.Acc_X_Filtered - 0.47;
+    double acc_y = mpu6050_data.Acc_Y_Filtered + 0.5;
+    double acc_z = mpu6050_data.Acc_Z_Filtered - 0.48;
     
-    // 转换为G力单位 (1G = 9.81 m/s²)
-    fused_data.current_accel_g = acc_x / 9.81;      // 纵向G力
-    fused_data.current_lateral_g = acc_y / 9.81;    // 横向G力  
-    fused_data.current_vertical_g = acc_z / 9.81;   // 垂直G力
+    // 最大化GPS-IMU融合精度 - 10Hz优化
+    static double gps_speed_history[16] = {0}; // 适配10Hz的更大缓冲区
+    static int gps_history_index = 0;
+    static double imu_confidence = 1.0;
     
-    // 应用滤波器减少噪声
+    // 更新GPS速度历史 - 10Hz高频数据
+    if (gps_data.valid_speed) {
+        gps_speed_history[gps_history_index] = gps_data.speed_kmh;
+        gps_history_index = (gps_history_index + 1) % 16;
+    }
+    
+    // 计算GPS速度稳定性 - 16点分析
+    double gps_variance = 0.0;
+    double gps_avg = 0.0;
+    for (int i = 0; i < 16; i++) {
+        gps_avg += gps_speed_history[i];
+    }
+    gps_avg /= 16.0;
+    
+    for (int i = 0; i < 16; i++) {
+        double diff = gps_speed_history[i] - gps_avg;
+        gps_variance += diff * diff;
+    }
+    gps_variance /= 16.0;
+    
+    // 动态信心度调整
+    double gps_stability = 1.0 / (1.0 + gps_variance);
+    double signal_quality = (gps_data.satellites >= 8 && gps_data.hdop < 1.5) ? 1.0 : 0.6;
+    imu_confidence = gps_stability * signal_quality;
+    
+    // 10Hz下的高精度静止检测
+    bool is_stationary = false;
+    if (gps_data.valid_speed && gps_data.satellites >= 6) {
+        bool gps_stationary = (gps_avg < 1.0 && sqrt(gps_variance) < 0.2); // 10Hz下更严格的标准
+        bool imu_stationary = (abs(acc_x) < 1.2 && abs(acc_y) < 1.2); // 更精细的IMU阈值
+        is_stationary = gps_stationary && imu_stationary;
+    }
+    
+    double raw_accel_g, raw_lateral_g;
+    
+    if (is_stationary) {
+        // 静止状态：使用最小化算法去除重力偏差
+        static double gravity_bias_x = 0.0, gravity_bias_y = 0.0;
+        static int calibration_samples = 0;
+        
+        if (calibration_samples < 50) {
+            gravity_bias_x += acc_x;
+            gravity_bias_y += acc_y;
+            calibration_samples++;
+        } else {
+            gravity_bias_x /= calibration_samples;
+            gravity_bias_y /= calibration_samples;
+        }
+        
+        raw_accel_g = (acc_x - gravity_bias_x) / 9.81;
+        raw_lateral_g = (acc_y - gravity_bias_y) / 9.81;
+        
+        // 静止时强制归零
+        if (abs(raw_accel_g) < 0.02) raw_accel_g = 0.0;
+        if (abs(raw_lateral_g) < 0.02) raw_lateral_g = 0.0;
+    } else {
+        // 动态状态：高精度G力计算
+        raw_accel_g = acc_x / 9.81;
+        raw_lateral_g = acc_y / 9.81;
+        
+        // GPS辅助的重力补偿
+        if (gps_data.valid_speed && gps_data.speed_kmh > 2.0) {
+            // 使用GPS速度变化率估计纵向加速度
+            static double prev_gps_speed = 0.0;
+            static unsigned long prev_time = 0;
+            unsigned long current_time = millis();
+            
+            if (prev_time > 0) {
+                double dt = (current_time - prev_time) / 1000.0;
+                if (dt > 0.05 && dt < 0.5) { // 合理时间间隔
+                    double gps_accel_g = (gps_data.speed_mps - prev_gps_speed/3.6) / (dt * 9.81);
+                    
+                    // 融合GPS和IMU的加速度数据
+                    double fusion_weight = imu_confidence;
+                    raw_accel_g = raw_accel_g * fusion_weight + gps_accel_g * (1.0 - fusion_weight);
+                }
+            }
+            prev_gps_speed = gps_data.speed_mps * 3.6;
+            prev_time = current_time;
+        }
+    }
+    
+    // 自适应高精度滤波器
+    double filter_alpha = is_stationary ? 0.95 : (0.4 + 0.4 * imu_confidence);
     static double filtered_accel_g = 0.0;
     static double filtered_lateral_g = 0.0;
+    static bool first_run = true;
     
-    filtered_accel_g = ACCEL_FILTER_ALPHA * fused_data.current_accel_g + 
-                       (1.0 - ACCEL_FILTER_ALPHA) * filtered_accel_g;
-    filtered_lateral_g = ACCEL_FILTER_ALPHA * fused_data.current_lateral_g + 
-                         (1.0 - ACCEL_FILTER_ALPHA) * filtered_lateral_g;
+    if (first_run) {
+        filtered_accel_g = raw_accel_g;
+        filtered_lateral_g = raw_lateral_g;
+        first_run = false;
+    } else {
+        filtered_accel_g = filtered_accel_g * filter_alpha + raw_accel_g * (1.0 - filter_alpha);
+        filtered_lateral_g = filtered_lateral_g * filter_alpha + raw_lateral_g * (1.0 - filter_alpha);
+    }
+    
+    // 动态死区处理
+    double deadzone = is_stationary ? 0.01 : (0.02 / (1.0 + imu_confidence));
+    if (abs(filtered_accel_g) < deadzone) filtered_accel_g = 0.0;
+    if (abs(filtered_lateral_g) < deadzone) filtered_lateral_g = 0.0;
     
     fused_data.current_accel_g = filtered_accel_g;
     fused_data.current_lateral_g = filtered_lateral_g;
+    fused_data.current_vertical_g = acc_z / 9.81;
     
-    // 更新会话峰值
-    if (fused_data.current_accel_g > fused_data.session_max_accel_g) {
-        fused_data.session_max_accel_g = fused_data.current_accel_g;
+    // 只在高质量数据时更新峰值
+    if (!is_stationary && imu_confidence > 0.7 && abs(fused_data.current_accel_g) > 0.05) {
+        if (fused_data.current_accel_g > fused_data.session_max_accel_g) {
+            fused_data.session_max_accel_g = fused_data.current_accel_g;
+        }
+        if (fused_data.current_accel_g < -fused_data.session_max_brake_g) {
+            fused_data.session_max_brake_g = -fused_data.current_accel_g;
+        }
     }
     
-    if (fused_data.current_accel_g < -fused_data.session_max_brake_g) {
-        fused_data.session_max_brake_g = -fused_data.current_accel_g;
-    }
-    
-    if (abs(fused_data.current_lateral_g) > fused_data.session_max_lateral_g) {
+    if (!is_stationary && abs(fused_data.current_lateral_g) > fused_data.session_max_lateral_g) {
         fused_data.session_max_lateral_g = abs(fused_data.current_lateral_g);
     }
 }

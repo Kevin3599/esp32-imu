@@ -8,7 +8,7 @@
 // GPS模块引脚定义
 #define GPS_RX_PIN 16   // ESP32 RX <- GPS TX
 #define GPS_TX_PIN 17   // ESP32 TX -> GPS RX  
-#define GPS_BAUD 9600   // GT-U7默认波特率
+#define GPS_BAUD 9600   // GT-U7默认波特率9600
 
 // GPS数据结构
 struct GPS_DATA {
@@ -31,9 +31,31 @@ struct GPS_DATA {
     double speed_mps = 0.0;     // 速度 (m/s)
     double course = 0.0;        // 航向角度
     
-    // 信号质量
+    // 信号质量 - 增强
     int satellites = 0;         // 卫星数量
     double hdop = 0.0;          // 水平精度稀释
+    double vdop = 0.0;          // 垂直精度稀释
+    double pdop = 0.0;          // 位置精度稀释
+    int fix_quality = 0;        // 定位质量 (0=无效, 1=GPS, 2=DGPS)
+    
+    // 高精度性能监控
+    double speed_accuracy = 0.0;  // 速度精度估计
+    double position_accuracy = 0.0; // 位置精度估计
+    unsigned long last_fix_time = 0;  // 最后定位时间
+    
+    // IMU-GPS融合速度数据（Dragy模式）
+    double smooth_speed_kmh = 0.0;      // 融合后的顺滑速度
+    double fused_speed_ms = 0.0;        // 融合速度 (m/s) - 高精度
+    double imu_speed_delta = 0.0;       // IMU积分的速度增量
+    bool speed_increasing = false;      // 速度是否在增加  
+    double acceleration_ms2 = 0.0;      // 当前加速度估计
+    double last_update_time_ms = 0;     // 上次更新时间
+    bool imu_calibrated = false;        // IMU是否已校准
+    double accel_bias = 0.0;            // 加速度偏置校准值
+    int calibration_count = 0;          // 校准样本计数
+    double last_gps_speed_ms = 0.0;     // 上次GPS速度 (m/s)
+    unsigned long last_gps_time = 0;    // 上次GPS更新时间
+    double speed_ms = 0.0;              // 当前速度 (m/s)
     
     // 状态信息
     bool valid_location = false; // 位置有效性
@@ -109,5 +131,11 @@ double calculateDistance(double lat1, double lon1, double lat2, double lon2);
 String formatTime(unsigned long milliseconds);
 void saveSessionData();
 void loadSessionData();
+
+// Dragy模式GPS-IMU融合函数
+void fuseIMUSpeed(double accel_x, double accel_y, double dt);
+void calibrateIMUBias(double accel_x, double accel_y);
+double getFusedSpeedKmh();
+double interpolateSpeedAtTime(double target_speed_kmh, unsigned long* crossing_time);
 
 #endif
