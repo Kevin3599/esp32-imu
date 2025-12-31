@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ESP32 Draggy Racing Logger</title>
+<title>ESP32 Racing Logger</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font:14px Arial,sans-serif;background:#1a1a2e;color:#eee;padding:10px}
@@ -65,17 +65,17 @@ select,input{background:#0f3460;color:#fff;border:1px solid #1a1a2e;padding:4px 
 </head>
 <body>
 <div class="c">
-<h1>🏎️ ESP32 Draggy Racing Logger</h1>
+<h1>ESP32 Draggy Racing Logger</h1>
 <div class="s">
 <div><span id="st">连接中...</span> <span id="recStatus"></span></div>
 <div id="tm">--</div>
 </div>
 
 <div class="tabs">
-<button class="tab active" onclick="showTab('live')">📊 实时曲线</button>
-<button class="tab" onclick="showTab('perf')">⚡ 性能</button>
-<button class="tab" onclick="showTab('log')">📝 记录</button>
-<button class="tab" onclick="showTab('export')">💾 导出</button>
+<button class="tab active" onclick="showTab('live')">实时曲线</button>
+<button class="tab" onclick="showTab('perf')">性能</button>
+<button class="tab" onclick="showTab('log')">记录</button>
+<button class="tab" onclick="showTab('export')">导出</button>
 </div>
 
 <!-- 实时曲线页面 -->
@@ -110,8 +110,8 @@ select,input{background:#0f3460;color:#fff;border:1px solid #1a1a2e;padding:4px 
 </div>
 
 <div class="controls">
-<button class="btn green" onclick="toggleRec()" id="recBtn">⏺ 开始记录</button>
-<button class="btn blue" onclick="clearCharts()">🗑 清除</button>
+<button class="btn green" onclick="toggleRec()" id="recBtn">开始记录</button>
+<button class="btn blue" onclick="clearCharts()">清除</button>
 <select id="timeRange" onchange="setTimeRange()">
 <option value="30">30秒</option>
 <option value="60" selected>60秒</option>
@@ -139,8 +139,8 @@ select,input{background:#0f3460;color:#fff;border:1px solid #1a1a2e;padding:4px 
 <!-- 数据记录页面 -->
 <div class="section" id="log">
 <div class="controls">
-<button class="btn green" onclick="toggleRec()" id="recBtn2">⏺ 开始记录</button>
-<button class="btn orange" onclick="markEvent()">🚩 标记</button>
+<button class="btn green" onclick="toggleRec()" id="recBtn2">开始记录</button>
+<button class="btn orange" onclick="markEvent()">标记</button>
 <button class="btn" onclick="clearLog()">清除</button>
 <span style="color:#666;font-size:10px">已记录: <span id="logCnt">0</span> 条</span>
 </div>
@@ -154,11 +154,11 @@ select,input{background:#0f3460;color:#fff;border:1px solid #1a1a2e;padding:4px 
 
 <!-- 导出页面 -->
 <div class="section" id="export">
-<h3 style="color:#00ff88;margin-bottom:10px;font-size:13px">📊 数据导出</h3>
+<h3 style="color:#00ff88;margin-bottom:10px;font-size:13px">数据导出</h3>
 <div class="controls">
-<button class="btn green" onclick="exportCSV()">📥 CSV</button>
-<button class="btn blue" onclick="exportJSON()">📥 JSON</button>
-<button class="btn orange" onclick="copyData()">📋 复制</button>
+<button class="btn green" onclick="exportCSV()">CSV</button>
+<button class="btn blue" onclick="exportJSON()">JSON</button>
+<button class="btn orange" onclick="copyData()">复制</button>
 </div>
 <div class="export-box">
 <strong>说明:</strong> CSV可用Excel打开，JSON适合程序处理<br>
@@ -236,26 +236,32 @@ function fetchData() {
         }
         lastT = now;
         
-        document.getElementById('st').textContent = '🟢 在线';
+        document.getElementById('st').textContent = '[在线]';
+        document.getElementById('st').style.color = '#00ff88';
         document.getElementById('tm').textContent = new Date().toLocaleTimeString();
         
         processData(d, now);
     }).catch(() => {
-        document.getElementById('st').textContent = '🔴 离线';
+        document.getElementById('st').textContent = '[离线]';
+        document.getElementById('st').style.color = '#e94560';
     });
 }
 
 function processData(d, ts) {
-    const gpsOk = d.gps && d.gps.valid === 'true' && d.gps.satellites >= 4;
-    const rawSpd = gpsOk ? d.gps.speed : 0;
+    // 修复: valid是布尔值true/false，不是字符串
+    const gpsOk = d.gps && (d.gps.valid === true || d.gps.valid === 'true') && d.gps.satellites >= 4;
+    // 直接使用GPS速度，与OLED同步显示
+    const rawSpd = d.gps ? d.gps.speed : 0;
     const rawAG = d.performance ? d.performance.accelG : 0;
     const rawLG = d.performance ? d.performance.lateralG : 0;
     
-    smooth.speed = smooth.speed * CFG.smooth + rawSpd * (1 - CFG.smooth);
-    smooth.accelG = smooth.accelG * CFG.smooth + rawAG * (1 - CFG.smooth);
-    smooth.lateralG = smooth.lateralG * CFG.smooth + rawLG * (1 - CFG.smooth);
+    // 降低平滑系数，加快响应
+    const smoothFactor = 0.15;
+    smooth.speed = smooth.speed * smoothFactor + rawSpd * (1 - smoothFactor);
+    smooth.accelG = smooth.accelG * smoothFactor + rawAG * (1 - smoothFactor);
+    smooth.lateralG = smooth.lateralG * smoothFactor + rawLG * (1 - smoothFactor);
     
-    if(smooth.speed < 2) smooth.speed = 0;
+    if(smooth.speed < 1) smooth.speed = 0;
     
     // 更新显示
     document.getElementById('speed').textContent = smooth.speed.toFixed(1);
@@ -438,14 +444,14 @@ function toggleRec() {
     if(recording) {
         recStart = Date.now();
         recData = [];
-        b1.innerHTML = '⏹ 停止';
-        b2.innerHTML = '⏹ 停止';
+        b1.innerHTML = '停止';
+        b2.innerHTML = '停止';
         b1.style.background = '#e94560';
         b2.style.background = '#e94560';
         st.innerHTML = '<span class="rec-dot"></span>REC';
     } else {
-        b1.innerHTML = '⏺ 开始记录';
-        b2.innerHTML = '⏺ 开始记录';
+        b1.innerHTML = '开始记录';
+        b2.innerHTML = '开始记录';
         b1.style.background = '#00cc66';
         b2.style.background = '#00cc66';
         st.innerHTML = '已停止(' + recData.length + ')';
