@@ -3,597 +3,597 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ESP32 Draggy Performance Logger</title>
+<title>ESP32 Draggy Racing Logger</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font:14px Arial,sans-serif;background:#667eea;color:#333;padding:10px}
-.c{max-width:480px;margin:0 auto;background:#fff;padding:20px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.3)}
-h1{text-align:center;margin-bottom:20px;font-size:22px;color:#333}
-.s{display:flex;justify-content:space-between;background:#f0f0f0;padding:8px 12px;border-radius:5px;margin-bottom:15px;font-size:12px}
-#st{font-weight:bold;transition:color 0.3s ease}
-#tm{color:#666}
-.tabs{display:flex;margin-bottom:20px;border-radius:8px;overflow:hidden;background:#e9ecef}
-.tab{flex:1;padding:10px;text-align:center;cursor:pointer;background:#e9ecef;border:none;font-size:12px;transition:all .2s}
-.tab.active{background:#28a745;color:white}
-.tab:hover:not(.active){background:#dee2e6}
+body{font:14px Arial,sans-serif;background:#1a1a2e;color:#eee;padding:10px}
+.c{max-width:900px;margin:0 auto;background:#16213e;padding:15px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+h1{text-align:center;margin-bottom:12px;font-size:18px;color:#00ff88}
+.s{display:flex;justify-content:space-between;background:#0f3460;padding:6px 10px;border-radius:5px;margin-bottom:12px;font-size:11px}
+#st{font-weight:bold;color:#00ff88}
+#tm{color:#888}
+.tabs{display:flex;margin-bottom:12px;border-radius:8px;overflow:hidden;background:#0f3460}
+.tab{flex:1;padding:8px;text-align:center;cursor:pointer;background:#0f3460;border:none;font-size:11px;color:#888;transition:all .2s}
+.tab.active{background:#e94560;color:white}
+.tab:hover:not(.active){background:#1a1a2e;color:#fff}
 .section{display:none}
 .section.active{display:block}
-.g{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
-.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:20px}
-.b{padding:12px;border:2px solid #28a745;border-radius:8px;text-align:center;background:#f9fff9}
-.b.gps{border-color:#007bff;background:#f8f9ff}
-.b.perf{border-color:#fd7e14;background:#fff8f0}
-.v{font:bold 16px monospace;color:#28a745;display:block;margin-bottom:3px}
-.v.gps{color:#007bff}
-.v.perf{color:#fd7e14}
-.v.big{font-size:20px}
-.l{font-size:10px;color:#666;text-transform:uppercase}
-.cube{width:120px;height:120px;margin:20px auto;perspective:200px}
-.cb{width:60px;height:60px;margin:30px auto;transform-style:preserve-3d;transition:transform .1s}
-.f{position:absolute;width:60px;height:60px;border:1px solid #28a745;background:rgba(40,167,69,.1);display:flex;align-items:center;justify-content:center;font-size:10px;color:#28a745}
-.f1{transform:rotateY(0deg) translateZ(30px)}
-.f2{transform:rotateY(180deg) translateZ(30px)}
-.f3{transform:rotateY(90deg) translateZ(30px)}
-.f4{transform:rotateY(-90deg) translateZ(30px)}
-.f5{transform:rotateX(90deg) translateZ(30px)}
-.f6{transform:rotateX(-90deg) translateZ(30px)}
-.foot{text-align:center;font-size:10px;color:#666;margin-top:15px;border-top:1px solid #eee;padding-top:10px}
-.err{background:#f8d7da;color:#721c24;padding:8px;border-radius:4px;margin:8px 0;font-size:11px;display:none}
-.status{padding:5px 10px;border-radius:15px;font-size:11px;margin:2px;display:inline-block}
-.status.acc{background:#28a745;color:white}
-.status.brk{background:#dc3545;color:white}
-.status.cor{background:#ffc107;color:#000}
-#map{width:100%;height:300px;border-radius:8px;margin-bottom:20px}
-.gps-info{background:#f8f9ff;padding:10px;border-radius:8px;margin-bottom:10px;font-size:12px}
-.coord{font-family:monospace;color:#007bff}
-.btn{background:#28a745;color:white;border:none;padding:8px 16px;border-radius:5px;cursor:pointer;font-size:13px;transition:background .3s}
-.btn:hover{background:#218838}
-.btn:active{background:#1e7e34}
+.g{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:12px}
+.b{padding:8px;border:1px solid #0f3460;border-radius:6px;text-align:center;background:#1a1a2e}
+.b.speed{border-color:#00ff88;background:linear-gradient(135deg,#1a1a2e,#0a2a1a)}
+.b.gforce{border-color:#e94560;background:linear-gradient(135deg,#1a1a2e,#2a1a1a)}
+.v{font:bold 16px monospace;color:#00ff88;display:block;margin-bottom:2px}
+.v.red{color:#e94560}
+.v.yellow{color:#ffd700}
+.v.big{font-size:24px}
+.l{font-size:8px;color:#666;text-transform:uppercase}
+.chart-box{background:#0a0a1a;border-radius:6px;padding:8px;margin-bottom:10px;border:1px solid #0f3460}
+.chart-title{font-size:11px;color:#888;margin-bottom:6px;display:flex;justify-content:space-between}
+.legend{display:flex;gap:12px;font-size:9px}
+.legend-item{display:flex;align-items:center;gap:3px}
+.legend-dot{width:10px;height:3px;border-radius:2px}
+canvas{width:100%;display:block}
+.controls{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+.btn{background:#e94560;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:10px;transition:all .2s}
+.btn:hover{background:#ff6b6b}
+.btn.green{background:#00cc66}
+.btn.green:hover{background:#00ff88}
+.btn.blue{background:#0066cc}
+.btn.orange{background:#ff8800}
+.rec-dot{display:inline-block;width:8px;height:8px;background:#e94560;border-radius:50%;margin-right:4px;animation:blink 1s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+.stats-row{display:flex;justify-content:space-between;background:#0a0a1a;padding:6px 10px;border-radius:4px;margin-bottom:6px;font-size:10px}
+.stats-label{color:#666}
+.stats-value{color:#00ff88;font-family:monospace}
+.log-panel{background:#0a0a1a;border-radius:6px;padding:8px;max-height:180px;overflow-y:auto;font-family:monospace;font-size:9px;border:1px solid #0f3460}
+.log-row{padding:2px 0;border-bottom:1px solid #1a1a2e;display:grid;grid-template-columns:70px 50px 50px 50px 30px 40px;gap:5px}
+.log-row.header{color:#666;border-bottom:2px solid #0f3460;font-weight:bold}
+.log-time{color:#666}
+.log-speed{color:#00ff88}
+.log-accel{color:#e94560}
+.log-lat{color:#ffd700}
+.log-sats{color:#0088ff}
+.log-event{color:#ff8800}
+.export-box{background:#0f3460;padding:8px;border-radius:4px;margin-top:8px;font-size:10px}
+.footer{text-align:center;font-size:9px;color:#444;margin-top:12px;padding-top:8px;border-top:1px solid #0f3460}
+select,input{background:#0f3460;color:#fff;border:1px solid #1a1a2e;padding:4px 8px;border-radius:3px;font-size:10px}
+.gps-badge{padding:3px 6px;border-radius:8px;font-size:9px;display:inline-block}
+.gps-badge.fix{background:#00cc66;color:#000}
+.gps-badge.search{background:#ffd700;color:#000}
+.gps-badge.off{background:#666;color:#fff}
 </style>
 </head>
 <body>
 <div class="c">
-<h1>ESP32 Performance Logger</h1>
+<h1>🏎️ ESP32 Draggy Racing Logger</h1>
 <div class="s">
-<div id="st">连接中...</div>
-<div id="tm">等待数据...</div>
+<div><span id="st">连接中...</span> <span id="recStatus"></span></div>
+<div id="tm">--</div>
 </div>
 
 <div class="tabs">
-<button class="tab active" onclick="showTab('imu')">IMU</button>
-<button class="tab" onclick="showTab('gps')">GPS</button>
-<button class="tab" onclick="showTab('perf')">性能</button>
-<button class="tab" onclick="showTab('map')">地图</button>
+<button class="tab active" onclick="showTab('live')">📊 实时曲线</button>
+<button class="tab" onclick="showTab('perf')">⚡ 性能</button>
+<button class="tab" onclick="showTab('log')">📝 记录</button>
+<button class="tab" onclick="showTab('export')">💾 导出</button>
 </div>
 
-<div class="err" id="err"></div>
-
-<!-- IMU数据页面 -->
-<div class="section active" id="imu">
+<!-- 实时曲线页面 -->
+<div class="section active" id="live">
 <div class="g">
-<div class="b"><span class="v" id="t">--</span><div class="l">温度(°C)</div></div>
-<div class="b"><span class="v" id="g">--</span><div class="l">重力(m/s²)</div></div>
-<div class="b"><span class="v" id="r">--</span><div class="l">Roll(°)</div></div>
-<div class="b"><span class="v" id="p">--</span><div class="l">Pitch(°)</div></div>
-</div>
-<div class="data-log" id="imuLog">
-<div class="log-entry">
-<span class="log-time">00:00:00</span>
-<span class="log-data">系统启动 - IMU初始化中...</span>
-</div>
-</div>
+<div class="b speed"><span class="v big" id="speed">0.0</span><div class="l">速度 km/h</div></div>
+<div class="b gforce"><span class="v red" id="accelG">0.00</span><div class="l">纵向G</div></div>
+<div class="b gforce"><span class="v yellow" id="lateralG">0.00</span><div class="l">横向G</div></div>
+<div class="b"><span class="v" id="sats">--</span><div class="l">卫星</div></div>
 </div>
 
-<!-- GPS数据页面 -->
-<div class="section" id="gps">
-<div class="g">
-<div class="b gps"><span class="v gps big" id="speed">--</span><div class="l">当前速度(km/h)</div></div>
-<div class="b gps"><span class="v gps" id="maxSpeed">--</span><div class="l">最高速度(km/h)</div></div>
-<div class="b gps"><span class="v gps" id="sats">--</span><div class="l">卫星数量</div></div>
-<div class="b gps"><span class="v gps" id="hdop">--</span><div class="l">精度HDOP</div></div>
+<div class="chart-box">
+<div class="chart-title">
+<span>速度曲线</span>
+<div class="legend">
+<div class="legend-item"><div class="legend-dot" style="background:#00ff88"></div>融合</div>
+<div class="legend-item"><div class="legend-dot" style="background:#0088ff"></div>GPS</div>
 </div>
-<div class="gps-info">
-<div><strong>GPS状态:</strong> <span id="gpsStatus">--</span></div>
-<div><strong>信号质量:</strong> <span id="signalQuality">--</span></div>
-<div><strong>位置:</strong> <span class="coord" id="coords">--</span></div>
-<div><strong>海拔:</strong> <span id="altitude">--</span>m | <strong>航向:</strong> <span id="course">--</span>°</div>
-<div><strong>连接时间:</strong> <span id="connectTime">--</span>s | <strong>最后更新:</strong> <span id="lastUpdate">--</span>s前</div>
+</div>
+<canvas id="speedChart" height="100"></canvas>
+</div>
+
+<div class="chart-box">
+<div class="chart-title">
+<span>G力曲线</span>
+<div class="legend">
+<div class="legend-item"><div class="legend-dot" style="background:#e94560"></div>纵向</div>
+<div class="legend-item"><div class="legend-dot" style="background:#ffd700"></div>横向</div>
+</div>
+</div>
+<canvas id="gforceChart" height="80"></canvas>
+</div>
+
+<div class="controls">
+<button class="btn green" onclick="toggleRec()" id="recBtn">⏺ 开始记录</button>
+<button class="btn blue" onclick="clearCharts()">🗑 清除</button>
+<select id="timeRange" onchange="setTimeRange()">
+<option value="30">30秒</option>
+<option value="60" selected>60秒</option>
+<option value="120">2分钟</option>
+</select>
+<span style="color:#666;font-size:10px">更新: <span id="hz">--</span>Hz</span>
 </div>
 </div>
 
 <!-- 性能数据页面 -->
 <div class="section" id="perf">
-<div class="g3">
-<div class="b perf"><span class="v perf" id="accelG">--</span><div class="l">加速度G</div></div>
-<div class="b perf"><span class="v perf" id="lateralG">--</span><div class="l">横向G</div></div>
-<div class="b perf"><span class="v perf" id="power">--</span><div class="l">功率(kW)</div></div>
-</div>
 <div class="g">
-<div class="b perf"><span class="v perf" id="accel100">--</span><div class="l">0-100km/h(秒)</div></div>
-<div class="b perf"><span class="v perf" id="brake100">--</span><div class="l">100-0制动(秒)</div></div>
+<div class="b speed" style="grid-column:span 2"><span class="v big" id="perfSpeed">0.0</span><div class="l">当前速度 km/h</div></div>
+<div class="b"><span class="v" id="maxSpeed">0.0</span><div class="l">最高速度</div></div>
+<div class="b"><span id="gpsBadge" class="gps-badge off">--</span><div class="l">GPS状态</div></div>
 </div>
-<div class="g3">
-<div class="b perf"><span class="v perf" id="maxAccelG">--</span><div class="l">最大加速G</div></div>
-<div class="b perf"><span class="v perf" id="maxBrakeG">--</span><div class="l">最大制动G</div></div>
-<div class="b perf"><span class="v perf" id="maxLateralG">--</span><div class="l">最大横向G</div></div>
-</div>
-<div id="statusArea" style="margin-top:10px;text-align:center"></div>
-</div>
-
-<!-- 地图页面 -->
-<div class="section" id="map-section">
-<div class="gps-info" style="margin-bottom:15px;text-align:center;background:#fff3cd;border:1px solid #ffeaa7;color:#856404">
-<strong id="mapStatus">地图功能说明</strong><br>
-<span id="mapStatusText">需要谷歌地图API密钥才能显示地图</span><br>
-<small>可在控制台输入: <code>setMapAPI('your-api-key')</code> 或点击下方简化地图</small>
+<div class="stats-row"><span class="stats-label">0-100 km/h</span><span class="stats-value" id="t100">--</span></div>
+<div class="stats-row"><span class="stats-label">100-0 制动</span><span class="stats-value" id="b100">--</span></div>
+<div class="stats-row"><span class="stats-label">最大加速G</span><span class="stats-value" id="maxAG">--</span></div>
+<div class="stats-row"><span class="stats-label">最大制动G</span><span class="stats-value" id="maxBG">--</span></div>
+<div class="stats-row"><span class="stats-label">最大横向G</span><span class="stats-value" id="maxLG">--</span></div>
+<div class="stats-row"><span class="stats-label">HDOP精度</span><span class="stats-value" id="hdop">--</span></div>
 </div>
 
-<!-- 简化地图按钮和选项 -->
-<div style="text-align:center;margin-bottom:15px;">
-<button onclick="toggleSimpleMap()" class="btn" id="simpleMapBtn">
-显示位置信息
-</button>
-<button onclick="openExternalMap()" class="btn" style="margin-left:10px;background:#17a2b8;">
-外部地图
-</button>
+<!-- 数据记录页面 -->
+<div class="section" id="log">
+<div class="controls">
+<button class="btn green" onclick="toggleRec()" id="recBtn2">⏺ 开始记录</button>
+<button class="btn orange" onclick="markEvent()">🚩 标记</button>
+<button class="btn" onclick="clearLog()">清除</button>
+<span style="color:#666;font-size:10px">已记录: <span id="logCnt">0</span> 条</span>
 </div>
-
-<!-- Google地图容器 -->
-<div id="map" style="background:#f8f9fa;display:flex;align-items:center;justify-content:center;color:#666;min-height:300px;">
-<div style="text-align:center">
-<div>地图加载中...</div>
-<div style="font-size:12px;margin-top:5px">需要谷歌地图API密钥</div>
+<div class="stats-row"><span class="stats-label">记录时长</span><span class="stats-value" id="recTime">00:00:00</span></div>
+<div class="log-panel" id="logPanel">
+<div class="log-row header">
+<span>时间</span><span>速度</span><span>纵向G</span><span>横向G</span><span>星</span><span>事件</span>
+</div>
 </div>
 </div>
 
-<!-- 简化位置信息显示 -->
-<div id="simpleLocationDisplay" style="display:none;margin:15px 0;padding:15px;background:#f8f9fa;border:1px solid #ddd;border-radius:5px;">
-<h4 style="margin:0 0 10px 0;color:#495057;">位置详情</h4>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:14px;">
-<div><strong>纬度:</strong> <span id="simpleLat">--</span></div>
-<div><strong>经度:</strong> <span id="simpleLng">--</span></div>
-<div><strong>海拔:</strong> <span id="simpleAlt">--</span> m</div>
-<div><strong>速度:</strong> <span id="simpleSpeed">--</span> km/h</div>
-<div><strong>卫星:</strong> <span id="simpleSats">--</span></div>
-<div><strong>精度:</strong> <span id="simpleHDOP">--</span></div>
+<!-- 导出页面 -->
+<div class="section" id="export">
+<h3 style="color:#00ff88;margin-bottom:10px;font-size:13px">📊 数据导出</h3>
+<div class="controls">
+<button class="btn green" onclick="exportCSV()">📥 CSV</button>
+<button class="btn blue" onclick="exportJSON()">📥 JSON</button>
+<button class="btn orange" onclick="copyData()">📋 复制</button>
+</div>
+<div class="export-box">
+<strong>说明:</strong> CSV可用Excel打开，JSON适合程序处理<br>
+字段: 时间、速度、G力、卫星、HDOP、位置
+</div>
+<div class="stats-row" style="margin-top:10px"><span class="stats-label">数据量</span><span class="stats-value" id="dataSize">0 KB</span></div>
+<div class="stats-row"><span class="stats-label">平均速度</span><span class="stats-value" id="avgSpd">-- km/h</span></div>
+<div class="stats-row"><span class="stats-label">最高速度</span><span class="stats-value" id="expMax">-- km/h</span></div>
+<div class="stats-row"><span class="stats-label">最大加速</span><span class="stats-value" id="expAcc">-- G</span></div>
+
+<div class="chart-box" style="margin-top:10px">
+<div class="chart-title">数据预览</div>
+<canvas id="previewChart" height="60"></canvas>
 </div>
 </div>
 
-<div class="gps-info">
-<div><strong>实时位置:</strong> <span class="coord" id="mapCoords">--</span></div>
-<div><strong>实时速度:</strong> <span id="mapSpeed">--</span> km/h</div>
-<div><strong>最高速度:</strong> <span id="mapMaxSpeed">--</span> km/h</div>
-<div><strong>行驶方向:</strong> <span id="mapCourse">--</span>°</div>
-</div>
-</div>
-
-<div class="foot">ESP32 Draggy Performance Logger v1.0</div>
+<div class="footer">ESP32 Draggy v2.0 | 10Hz GPS + 200Hz IMU</div>
 </div>
 
 <script>
-let currentTab = 'imu';
-let map, marker, trackPath = [];
-let trackPolyline;
-let lastValidPosition = null;
-
-// 数据平滑处理 - 增强版
-let smoothData = {
-    speed: 0,
-    accelG: 0,
-    lateralG: 0,
-    roll: 0,
-    pitch: 0
+// 配置
+const CFG = {
+    interval: 150,
+    maxPts: 400,
+    smooth: 0.3
 };
 
-let dataHistory = {
-    speed: [],
-    roll: [],
-    pitch: []
-};
+let tab = 'live';
+let recording = false;
+let recStart = 0;
+let recData = [];
+let chart = {speed:[],gps:[],accelG:[],lateralG:[],ts:[]};
+let smooth = {speed:0,accelG:0,lateralG:0};
+let lastT = Date.now();
+let cnt = 0;
+let timeRange = 60;
 
-const SMOOTH_FACTOR = 0.4; // 平滑系数 (0-1, 降低以提高响应速度)
-const HISTORY_SIZE = 5; // 历史数据窗口大小
+// Canvas
+let sCtx, gCtx, pCtx;
 
-// 异常值检测和过滤
-function filterOutliers(newValue, history, maxDiff = 5.0) {
-    if (history.length === 0) return newValue;
-    
-    // 计算历史平均值
-    const avg = history.reduce((sum, val) => sum + val, 0) / history.length;
-    
-    // 如果新值与平均值差距过大，视为异常值
-    if (Math.abs(newValue - avg) > maxDiff) {
-        return avg; // 返回平均值代替异常值
-    }
-    
-    return newValue;
-}
-
-// 更新历史数据
-function updateHistory(history, newValue) {
-    history.push(newValue);
-    if (history.length > HISTORY_SIZE) {
-        history.shift();
-    }
-}
-
-// 状态管理 - 避免重复更新
-let lastConnectionStatus = '';
-let lastUpdateTime = '';
-let updateCounter = 0;
-
-// 地图API密钥管理
-let googleMapsAPIKey = localStorage.getItem('googleMapsAPI') || '';
-let mapInitialized = false;
-let simpleMapVisible = false;
-
-// 提供给用户设置API密钥的函数
-window.setMapAPI = function(apiKey) {
-    googleMapsAPIKey = apiKey;
-    localStorage.setItem('googleMapsAPI', apiKey);
-    document.getElementById('mapStatus').innerHTML = '地图已配置';
-    document.getElementById('mapStatusText').textContent = 'Google地图已启用';
-    location.reload(); // 重新加载页面以加载地图
-};
-
-// 切换简化地图显示
-function toggleSimpleMap() {
-    const display = document.getElementById('simpleLocationDisplay');
-    const btn = document.getElementById('simpleMapBtn');
-    
-    if (simpleMapVisible) {
-        display.style.display = 'none';
-        btn.innerHTML = '显示位置信息';
-        simpleMapVisible = false;
-    } else {
-        display.style.display = 'block';
-        btn.innerHTML = '隐藏位置信息';
-        simpleMapVisible = true;
-    }
-}
-
-// 打开外部地图
-function openExternalMap() {
-    const lat = lastValidPosition?.lat;
-    const lng = lastValidPosition?.lng;
-    
-    if (lat && lng) {
-        // 使用高德地图作为备选
-        const url = `https://www.amap.com/search?query=${lat},${lng}&city=all&geoobj=${lng}|${lat}|${lng}|${lat}&zoom=16`;
-        window.open(url, '_blank');
-    } else {
-        alert('GPS位置信息不可用，请等待GPS信号');
-    }
-}
-
-// 数据验证函数
-function isValidGPSData(gps) {
-    return gps && 
-           gps.valid && 
-           gps.satellites >= 4 && 
-           gps.hdop < 5.0 &&
-           gps.speed >= 0 && gps.speed < 400; // 合理的速度范围
-}
-
-function smoothValue(current, target, factor) {
-    if (isNaN(current) || isNaN(target)) return target || 0;
-    return current * factor + target * (1 - factor);
-}
-
-// 更新IMU日志
-function updateIMULog(roll, pitch, temp, gravity) {
-    const logContainer = document.getElementById('imuLog');
-    const timestamp = new Date().toLocaleTimeString();
-    
-    // 创建日志条目
-    const logEntry = document.createElement('div');
-    logEntry.className = 'log-entry';
-    
-    // 状态指示器
-    let status = 'ok';
-    let statusText = '正常';
-    
-    if (Math.abs(roll) > 30 || Math.abs(pitch) > 30) {
-        status = 'warning';
-        statusText = '倾斜';
-    }
-    
-    if (temp > 60 || temp < -10) {
-        status = 'error';
-        statusText = '温度异常';
-    }
-    
-    logEntry.innerHTML = `
-        <span class="log-time">${timestamp}</span>
-        <span class="status-indicator status-${status}"></span>
-        <span class="log-data">Roll:${roll}° Pitch:${pitch}° T:${temp}°C [${statusText}]</span>
-    `;
-    
-    // 添加到日志头部
-    logContainer.insertBefore(logEntry, logContainer.firstChild);
-    
-    // 保持最多50条记录
-    while (logContainer.children.length > 50) {
-        logContainer.removeChild(logContainer.lastChild);
-    }
-}
-
-function showTab(tab) {
-document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-document.querySelector(`.tab[onclick="showTab('${tab}')"]`).classList.add('active');
-if(tab === 'map') {
-document.getElementById('map-section').classList.add('active');
-if(!map) initMap();
-} else {
-document.getElementById(tab).classList.add('active');
-}
-currentTab = tab;
-}
-
-function initMap() {
-// 创建地图实例
-map = new google.maps.Map(document.getElementById('map'), {
-zoom: 15,
-center: { lat: 39.9042, lng: 116.4074 }, // 默认北京
-mapTypeId: 'satellite'
-});
-
-// 创建标记
-marker = new google.maps.Marker({
-position: map.getCenter(),
-map: map,
-title: 'ESP32 Draggy',
-icon: {
-path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-scale: 6,
-fillColor: '#FF0000',
-fillOpacity: 0.8,
-strokeWeight: 2,
-strokeColor: '#FFFFFF'
-}
-});
-
-// 创建轨迹线
-trackPolyline = new google.maps.Polyline({
-path: trackPath,
-geodesic: true,
-strokeColor: '#FF0000',
-strokeOpacity: 1.0,
-strokeWeight: 3
-});
-trackPolyline.setMap(map);
-}
-
-function updateMap(gpsData) {
-if(!map || !isValidGPSData(gpsData)) return;
-
-const position = {
-lat: gpsData.latitude,
-lng: gpsData.longitude
-};
-
-// 更新标记位置
-marker.setPosition(position);
-
-// 设置标记方向
-if(gpsData.course >= 0) {
-marker.setIcon({
-path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-scale: 6,
-fillColor: gpsData.speed > 5 ? '#00FF00' : '#FF0000',
-fillOpacity: 0.8,
-strokeWeight: 2,
-strokeColor: '#FFFFFF',
-rotation: gpsData.course
-});
-}
-
-// 添加到轨迹 (只有在高精度且移动时)
-if(gpsData.speed > 2 && gpsData.hdop < 3.0) {
-trackPath.push(position);
-if(trackPath.length > 300) trackPath.shift(); // 减少轨迹点数量
-trackPolyline.setPath(trackPath);
-}
-
-// 第一次定位时居中地图
-if(!lastValidPosition) {
-map.setCenter(position);
-map.setZoom(18);
-}
-
-lastValidPosition = position;
-
-// 更新地图页面的GPS信息
-document.getElementById('mapSpeed').textContent = gpsData.speed.toFixed(1);
-document.getElementById('mapMaxSpeed').textContent = gpsData.maxSpeed.toFixed(1);
-document.getElementById('mapCourse').textContent = gpsData.course.toFixed(0);
-
-// 更新简化地图显示
-if (simpleMapVisible) {
-document.getElementById('simpleLat').textContent = gpsData.lat.toFixed(6);
-document.getElementById('simpleLng').textContent = gpsData.lng.toFixed(6);
-document.getElementById('simpleAlt').textContent = gpsData.altitude.toFixed(1);
-document.getElementById('simpleSpeed').textContent = gpsData.speed.toFixed(1);
-document.getElementById('simpleSats').textContent = gpsData.satellites;
-document.getElementById('simpleHDOP').textContent = gpsData.hdop.toFixed(2);
-}
-}
-
-function updateData() {
-fetch('/data')
-.then(r => r.json())
-.then(d => {
-// 只有状态改变时才更新显示 - 避免闪烁
-const currentStatus = '在线';
-if (lastConnectionStatus !== currentStatus) {
-document.getElementById('st').textContent = currentStatus;
-document.getElementById('st').style.color = '#28a745'; // 绿色表示在线
-lastConnectionStatus = currentStatus;
-}
-
-// 减少时间更新频率 - 每5次更新一次时间
-updateCounter++;
-if (updateCounter % 5 === 0) {
-const currentTime = new Date().toLocaleTimeString();
-if (lastUpdateTime !== currentTime) {
-document.getElementById('tm').textContent = currentTime;
-lastUpdateTime = currentTime;
-}
-}
-
-document.getElementById('err').style.display = 'none';
-
-// 数据平滑处理 - 加入异常值过滤
-if (d.gps && isValidGPSData(d.gps)) {
-    // GPS速度异常值过滤
-    const filteredSpeed = filterOutliers(d.gps.speed, dataHistory.speed, 2.0); // 降低异常值阈值
-    updateHistory(dataHistory.speed, filteredSpeed);
-    
-    // 更严格的静止状态检测
-    const isStationary = filteredSpeed < 2.5; // 提高到2.5km/h
-    const finalSpeed = isStationary ? 0 : filteredSpeed;
-    
-    // 更强的滤波
-    const filterFactor = isStationary ? 0.95 : (filteredSpeed < 5.0 ? 0.8 : SMOOTH_FACTOR);
-    smoothData.speed = smoothValue(smoothData.speed, finalSpeed, filterFactor);
-} else {
-    smoothData.speed = smoothValue(smoothData.speed, 0, 0.95); // 更快归零
-}
-
-if (d.performance) {
-    smoothData.accelG = smoothValue(smoothData.accelG, d.performance.accelG, SMOOTH_FACTOR);
-    smoothData.lateralG = smoothValue(smoothData.lateralG, d.performance.lateralG, SMOOTH_FACTOR);
-}
-
-// 姿态角度平滑 (增强异常值过滤)
-const filteredRoll = filterOutliers(d.roll, dataHistory.roll, 10.0);
-const filteredPitch = filterOutliers(d.pitch, dataHistory.pitch, 10.0);
-updateHistory(dataHistory.roll, filteredRoll);
-updateHistory(dataHistory.pitch, filteredPitch);
-
-// 静止状态角度死区处理
-const isLowSpeed = smoothData.speed < 1.0;
-const deadZone = isLowSpeed ? 3.0 : 1.0;
-
-let finalRoll = Math.abs(filteredRoll) < deadZone ? 0 : filteredRoll;
-let finalPitch = Math.abs(filteredPitch) < deadZone ? 0 : filteredPitch;
-
-smoothData.roll = smoothValue(smoothData.roll, finalRoll, isLowSpeed ? 0.9 : 0.8);
-smoothData.pitch = smoothValue(smoothData.pitch, finalPitch, isLowSpeed ? 0.9 : 0.8);
-
-// IMU数据
-document.getElementById('t').textContent = d.temp;
-document.getElementById('g').textContent = d.gravity;
-document.getElementById('r').textContent = Math.round(smoothData.roll);
-document.getElementById('p').textContent = Math.round(smoothData.pitch);
-
-// 更新IMU日志 - 每5次更新记录一次
-if (updateCounter % 5 === 0) {
-    updateIMULog(
-        Math.round(smoothData.roll), 
-        Math.round(smoothData.pitch), 
-        Math.round(d.temp), 
-        Math.round(d.gravity * 100) / 100
-    );
-}
-
-// GPS数据 - 只有在数据有效时才更新显示
-if(d.gps) {
-if (isValidGPSData(d.gps)) {
-document.getElementById('speed').textContent = smoothData.speed.toFixed(1);
-document.getElementById('maxSpeed').textContent = d.gps.maxSpeed.toFixed(1);
-document.getElementById('coords').textContent = `${d.gps.latitude.toFixed(6)}, ${d.gps.longitude.toFixed(6)}`;
-document.getElementById('altitude').textContent = d.gps.altitude ? d.gps.altitude.toFixed(1) : '--';
-document.getElementById('course').textContent = d.gps.course ? d.gps.course.toFixed(0) : '--';
-document.getElementById('gpsStatus').textContent = '已定位';
-document.getElementById('gpsStatus').style.color = '#28a745';
-
-// 信号质量评估
-let signalQuality = '良好';
-let qualityColor = '#28a745';
-if (d.gps.hdop > 3.0 || d.gps.satellites < 5) {
-signalQuality = '较差';
-qualityColor = '#dc3545';
-} else if (d.gps.hdop > 2.0 || d.gps.satellites < 7) {
-signalQuality = '一般';
-qualityColor = '#ffc107';
-}
-document.getElementById('signalQuality').textContent = signalQuality;
-document.getElementById('signalQuality').style.color = qualityColor;
-} else {
-document.getElementById('gpsStatus').textContent = `搜星中 (${d.gps.satellites}星)`;
-document.getElementById('gpsStatus').style.color = '#ffc107';
-document.getElementById('signalQuality').textContent = '搜索中';
-document.getElementById('signalQuality').style.color = '#6c757d';
-}
-document.getElementById('sats').textContent = d.gps.satellites;
-document.getElementById('hdop').textContent = d.gps.hdop ? d.gps.hdop.toFixed(2) : '--';
-
-// 连接时间和最后更新时间
-if (!window.gpsConnectTime && isValidGPSData(d.gps)) {
-window.gpsConnectTime = Date.now();
-}
-if (window.gpsConnectTime) {
-const connectTime = Math.floor((Date.now() - window.gpsConnectTime) / 1000);
-document.getElementById('connectTime').textContent = connectTime;
-}
-document.getElementById('lastUpdate').textContent = Math.floor((Date.now() - (window.lastGPSUpdate || Date.now())) / 1000);
-if (d.gps.satellites > 0) {
-window.lastGPSUpdate = Date.now();
-}
-
-// 更新地图
-if(currentTab === 'map' && isValidGPSData(d.gps)) {
-updateMap(d.gps);
-}
-}
-
-// 性能数据
-if(d.performance) {
-document.getElementById('accelG').textContent = smoothData.accelG.toFixed(2);
-document.getElementById('lateralG').textContent = smoothData.lateralG.toFixed(2);
-document.getElementById('power').textContent = d.performance.power.toFixed(1);
-document.getElementById('accel100').textContent = d.performance.accel0to100 > 0 ? d.performance.accel0to100.toFixed(2) : '--';
-document.getElementById('brake100').textContent = d.performance.brake100to0 > 0 ? d.performance.brake100to0.toFixed(2) : '--';
-document.getElementById('maxAccelG').textContent = d.performance.maxAccelG.toFixed(2);
-document.getElementById('maxBrakeG').textContent = d.performance.maxBrakeG.toFixed(2);
-document.getElementById('maxLateralG').textContent = d.performance.maxLateralG.toFixed(2);
-
-// 状态指示 (基于平滑后的数据)
-let status = '';
-if(d.performance.isAccelerating && Math.abs(smoothData.accelG) > 0.1) status += '<span class="status acc">加速</span>';
-if(d.performance.isBraking && Math.abs(smoothData.accelG) > 0.1) status += '<span class="status brk">制动</span>';
-if(d.performance.isCornering && Math.abs(smoothData.lateralG) > 0.1) status += '<span class="status cor">转弯</span>';
-document.getElementById('statusArea').innerHTML = status || '<span style="color:#666">稳定</span>';
-}
-
-// 3D立方体 (使用平滑后的数据)
-document.getElementById('cb').style.transform = `rotateX(${smoothData.pitch}deg) rotateZ(${smoothData.roll}deg)`;
-})
-.catch(err => {
-console.error('数据获取失败:', err);
-// 只有状态改变时才更新显示
-const currentStatus = '离线';
-if (lastConnectionStatus !== currentStatus) {
-document.getElementById('st').textContent = currentStatus;
-document.getElementById('st').style.color = '#dc3545'; // 红色表示离线
-lastConnectionStatus = currentStatus;
-}
-document.getElementById('err').textContent = '连接失败，请检查网络';
-document.getElementById('err').style.display = 'block';
-});
-}
-
-// 页面加载完成后初始化
 window.onload = function() {
-// 提高更新频率以降低延迟
-setInterval(updateData, 150); // 从300ms改为150ms，约6.7Hz更新
-updateData();
+    sCtx = document.getElementById('speedChart').getContext('2d');
+    gCtx = document.getElementById('gforceChart').getContext('2d');
+    pCtx = document.getElementById('previewChart').getContext('2d');
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    setInterval(fetchData, CFG.interval);
+    setInterval(updateUI, 1000);
+    draw();
 };
-</script>
 
-<!-- 加载谷歌地图API -->
-<script async defer src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap"></script>
+function resizeCanvas() {
+    ['speedChart','gforceChart','previewChart'].forEach(id => {
+        const c = document.getElementById(id);
+        c.width = c.offsetWidth * 2;
+        c.height = parseInt(c.getAttribute('height')) * 2;
+    });
+}
+
+function showTab(t) {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
+    document.querySelector(`.tab[onclick="showTab('${t}')"]`).classList.add('active');
+    document.getElementById(t).classList.add('active');
+    tab = t;
+    if(t === 'export') updateExport();
+}
+
+function fetchData() {
+    fetch('/data').then(r => r.json()).then(d => {
+        const now = Date.now();
+        cnt++;
+        if(cnt % 10 === 0) {
+            document.getElementById('hz').textContent = (1000/(now-lastT)*10).toFixed(1);
+        }
+        lastT = now;
+        
+        document.getElementById('st').textContent = '🟢 在线';
+        document.getElementById('tm').textContent = new Date().toLocaleTimeString();
+        
+        processData(d, now);
+    }).catch(() => {
+        document.getElementById('st').textContent = '🔴 离线';
+    });
+}
+
+function processData(d, ts) {
+    const gpsOk = d.gps && d.gps.valid === 'true' && d.gps.satellites >= 4;
+    const rawSpd = gpsOk ? d.gps.speed : 0;
+    const rawAG = d.performance ? d.performance.accelG : 0;
+    const rawLG = d.performance ? d.performance.lateralG : 0;
+    
+    smooth.speed = smooth.speed * CFG.smooth + rawSpd * (1 - CFG.smooth);
+    smooth.accelG = smooth.accelG * CFG.smooth + rawAG * (1 - CFG.smooth);
+    smooth.lateralG = smooth.lateralG * CFG.smooth + rawLG * (1 - CFG.smooth);
+    
+    if(smooth.speed < 2) smooth.speed = 0;
+    
+    // 更新显示
+    document.getElementById('speed').textContent = smooth.speed.toFixed(1);
+    document.getElementById('perfSpeed').textContent = smooth.speed.toFixed(1);
+    document.getElementById('accelG').textContent = smooth.accelG.toFixed(2);
+    document.getElementById('lateralG').textContent = smooth.lateralG.toFixed(2);
+    
+    if(d.gps) {
+        document.getElementById('sats').textContent = d.gps.satellites;
+        document.getElementById('hdop').textContent = d.gps.hdop ? d.gps.hdop.toFixed(2) : '--';
+        document.getElementById('maxSpeed').textContent = d.gps.maxSpeed ? d.gps.maxSpeed.toFixed(1) : '--';
+        
+        const badge = document.getElementById('gpsBadge');
+        if(gpsOk) {
+            badge.className = 'gps-badge fix';
+            badge.textContent = d.gps.satellites + '星';
+        } else if(d.gps.satellites > 0) {
+            badge.className = 'gps-badge search';
+            badge.textContent = '搜星';
+        } else {
+            badge.className = 'gps-badge off';
+            badge.textContent = '无';
+        }
+    }
+    
+    if(d.performance) {
+        document.getElementById('t100').textContent = d.performance.accel0to100 > 0 ? d.performance.accel0to100.toFixed(2) + 's' : '--';
+        document.getElementById('b100').textContent = d.performance.brake100to0 > 0 ? d.performance.brake100to0.toFixed(2) + 's' : '--';
+        document.getElementById('maxAG').textContent = d.performance.maxAccelG.toFixed(2) + ' G';
+        document.getElementById('maxBG').textContent = d.performance.maxBrakeG.toFixed(2) + ' G';
+        document.getElementById('maxLG').textContent = d.performance.maxLateralG.toFixed(2) + ' G';
+    }
+    
+    // 曲线数据
+    const maxPts = Math.floor(timeRange * 1000 / CFG.interval);
+    chart.ts.push(ts);
+    chart.speed.push(smooth.speed);
+    chart.gps.push(rawSpd);
+    chart.accelG.push(smooth.accelG);
+    chart.lateralG.push(smooth.lateralG);
+    
+    while(chart.ts.length > maxPts) {
+        chart.ts.shift();
+        chart.speed.shift();
+        chart.gps.shift();
+        chart.accelG.shift();
+        chart.lateralG.shift();
+    }
+    
+    // 记录
+    if(recording) {
+        recData.push({
+            t: ts - recStart,
+            ts: new Date(ts).toISOString(),
+            spd: smooth.speed,
+            gpsSpd: rawSpd,
+            aG: smooth.accelG,
+            lG: smooth.lateralG,
+            sat: d.gps ? d.gps.satellites : 0,
+            hdop: d.gps ? d.gps.hdop : null,
+            lat: d.gps ? d.gps.latitude : null,
+            lng: d.gps ? d.gps.longitude : null,
+            evt: null
+        });
+        document.getElementById('logCnt').textContent = recData.length;
+        if(recData.length % 10 === 0) updateLog();
+    }
+    
+    if(tab === 'live') draw();
+}
+
+function draw() {
+    drawSpeed();
+    drawGforce();
+}
+
+function drawSpeed() {
+    const c = document.getElementById('speedChart');
+    const ctx = sCtx;
+    const w = c.width, h = c.height;
+    
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0,0,w,h);
+    
+    if(chart.speed.length < 2) return;
+    
+    const maxS = Math.max(20, ...chart.speed, ...chart.gps) * 1.1;
+    
+    // 网格
+    ctx.strokeStyle = '#1a1a2e';
+    ctx.lineWidth = 1;
+    for(let i=0;i<=4;i++) {
+        const y = h*i/4;
+        ctx.beginPath();
+        ctx.moveTo(0,y);
+        ctx.lineTo(w,y);
+        ctx.stroke();
+    }
+    
+    // GPS曲线(虚线)
+    ctx.strokeStyle = '#0088ff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6,3]);
+    ctx.beginPath();
+    for(let i=0;i<chart.gps.length;i++) {
+        const x = i/(chart.gps.length-1)*w;
+        const y = h - chart.gps[i]/maxS*h;
+        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    
+    // 融合曲线(实线)
+    ctx.strokeStyle = '#00ff88';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    for(let i=0;i<chart.speed.length;i++) {
+        const x = i/(chart.speed.length-1)*w;
+        const y = h - chart.speed[i]/maxS*h;
+        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    
+    // 当前值
+    ctx.fillStyle = '#00ff88';
+    ctx.font = 'bold 20px monospace';
+    const cur = chart.speed[chart.speed.length-1] || 0;
+    ctx.fillText(cur.toFixed(1) + ' km/h', w-130, 25);
+}
+
+function drawGforce() {
+    const c = document.getElementById('gforceChart');
+    const ctx = gCtx;
+    const w = c.width, h = c.height;
+    
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0,0,w,h);
+    
+    if(chart.accelG.length < 2) return;
+    
+    const maxG = Math.max(1, Math.max(...chart.accelG.map(Math.abs)), Math.max(...chart.lateralG.map(Math.abs))) * 1.2;
+    
+    // 零线
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0,h/2);
+    ctx.lineTo(w,h/2);
+    ctx.stroke();
+    
+    // 纵向G
+    ctx.strokeStyle = '#e94560';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for(let i=0;i<chart.accelG.length;i++) {
+        const x = i/(chart.accelG.length-1)*w;
+        const y = h/2 - chart.accelG[i]/maxG*(h/2);
+        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    
+    // 横向G
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for(let i=0;i<chart.lateralG.length;i++) {
+        const x = i/(chart.lateralG.length-1)*w;
+        const y = h/2 - chart.lateralG[i]/maxG*(h/2);
+        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+}
+
+function toggleRec() {
+    recording = !recording;
+    const b1 = document.getElementById('recBtn');
+    const b2 = document.getElementById('recBtn2');
+    const st = document.getElementById('recStatus');
+    
+    if(recording) {
+        recStart = Date.now();
+        recData = [];
+        b1.innerHTML = '⏹ 停止';
+        b2.innerHTML = '⏹ 停止';
+        b1.style.background = '#e94560';
+        b2.style.background = '#e94560';
+        st.innerHTML = '<span class="rec-dot"></span>REC';
+    } else {
+        b1.innerHTML = '⏺ 开始记录';
+        b2.innerHTML = '⏺ 开始记录';
+        b1.style.background = '#00cc66';
+        b2.style.background = '#00cc66';
+        st.innerHTML = '已停止(' + recData.length + ')';
+    }
+}
+
+function markEvent() {
+    if(recording && recData.length > 0) {
+        recData[recData.length-1].evt = 'MARK';
+        updateLog();
+    }
+}
+
+function updateLog() {
+    const p = document.getElementById('logPanel');
+    const hdr = p.children[0];
+    p.innerHTML = '';
+    p.appendChild(hdr);
+    
+    recData.slice(-30).reverse().forEach(d => {
+        const row = document.createElement('div');
+        row.className = 'log-row';
+        const t = new Date(d.ts).toLocaleTimeString();
+        row.innerHTML = `
+            <span class="log-time">${t}</span>
+            <span class="log-speed">${d.spd.toFixed(1)}</span>
+            <span class="log-accel">${d.aG.toFixed(2)}</span>
+            <span class="log-lat">${d.lG.toFixed(2)}</span>
+            <span class="log-sats">${d.sat}</span>
+            <span class="log-event">${d.evt||''}</span>
+        `;
+        p.appendChild(row);
+    });
+}
+
+function clearLog() {
+    if(confirm('清除所有记录?')) {
+        recData = [];
+        document.getElementById('logCnt').textContent = '0';
+        updateLog();
+    }
+}
+
+function clearCharts() {
+    chart = {speed:[],gps:[],accelG:[],lateralG:[],ts:[]};
+    draw();
+}
+
+function setTimeRange() {
+    timeRange = parseInt(document.getElementById('timeRange').value);
+}
+
+function updateUI() {
+    if(recording) {
+        const dur = Date.now() - recStart;
+        document.getElementById('recTime').textContent = fmtTime(dur);
+    }
+}
+
+function updateExport() {
+    if(recData.length === 0) return;
+    
+    const size = JSON.stringify(recData).length / 1024;
+    document.getElementById('dataSize').textContent = size.toFixed(1) + ' KB';
+    
+    const spds = recData.map(d => d.spd).filter(s => s > 0);
+    const avg = spds.length ? spds.reduce((a,b)=>a+b,0)/spds.length : 0;
+    const max = spds.length ? Math.max(...spds) : 0;
+    const maxA = Math.max(...recData.map(d => d.aG));
+    
+    document.getElementById('avgSpd').textContent = avg.toFixed(1) + ' km/h';
+    document.getElementById('expMax').textContent = max.toFixed(1) + ' km/h';
+    document.getElementById('expAcc').textContent = maxA.toFixed(2) + ' G';
+    
+    drawPreview();
+}
+
+function drawPreview() {
+    if(recData.length < 2) return;
+    const c = document.getElementById('previewChart');
+    const ctx = pCtx;
+    const w = c.width, h = c.height;
+    
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0,0,w,h);
+    
+    const data = recData.slice(-200);
+    const maxS = Math.max(20, ...data.map(d=>d.spd)) * 1.1;
+    
+    ctx.strokeStyle = '#00ff88';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for(let i=0;i<data.length;i++) {
+        const x = i/(data.length-1)*w;
+        const y = h - data[i].spd/maxS*h;
+        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+}
+
+function exportCSV() {
+    if(!recData.length) return alert('无数据');
+    let csv = 'Time(ms),Timestamp,Speed,GPSSpeed,AccelG,LateralG,Sats,HDOP,Lat,Lng,Event\n';
+    recData.forEach(d => {
+        csv += `${d.t},${d.ts},${d.spd.toFixed(2)},${d.gpsSpd.toFixed(2)},${d.aG.toFixed(4)},${d.lG.toFixed(4)},${d.sat},${d.hdop||''},${d.lat||''},${d.lng||''},${d.evt||''}\n`;
+    });
+    download(csv, `draggy_${fmtDate()}.csv`, 'text/csv');
+}
+
+function exportJSON() {
+    if(!recData.length) return alert('无数据');
+    const obj = {
+        version: '2.0',
+        device: 'ESP32 Draggy',
+        time: new Date().toISOString(),
+        count: recData.length,
+        data: recData
+    };
+    download(JSON.stringify(obj,null,2), `draggy_${fmtDate()}.json`, 'application/json');
+}
+
+function copyData() {
+    if(!recData.length) return alert('无数据');
+    const txt = recData.map(d => `${d.t}\t${d.spd.toFixed(2)}\t${d.aG.toFixed(3)}\t${d.lG.toFixed(3)}`).join('\n');
+    navigator.clipboard.writeText(txt).then(() => alert('已复制!'));
+}
+
+function download(content, name, type) {
+    const blob = new Blob([content], {type});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function fmtTime(ms) {
+    const s = Math.floor(ms/1000);
+    const m = Math.floor(s/60);
+    const h = Math.floor(m/60);
+    return `${h.toString().padStart(2,'0')}:${(m%60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+}
+
+function fmtDate() {
+    const n = new Date();
+    return `${n.getFullYear()}${(n.getMonth()+1).toString().padStart(2,'0')}${n.getDate().toString().padStart(2,'0')}_${n.getHours().toString().padStart(2,'0')}${n.getMinutes().toString().padStart(2,'0')}`;
+}
+</script>
 </body>
 </html>
