@@ -61,6 +61,15 @@ select,input{background:#0f3460;color:#fff;border:1px solid #1a1a2e;padding:4px 
 .gps-badge.fix{background:#00cc66;color:#000}
 .gps-badge.search{background:#ffd700;color:#000}
 .gps-badge.off{background:#666;color:#fff}
+.lean-gauge{position:relative;height:120px;background:#0a0a1a;border-radius:8px;overflow:hidden;border:1px solid #0f3460}
+.lean-indicator{position:absolute;bottom:0;left:50%;width:4px;height:80px;background:linear-gradient(to top,#e94560,#ff8800);transform-origin:bottom center;transition:transform 0.1s}
+.lean-scale{position:absolute;bottom:10px;width:100%;text-align:center;font-size:9px;color:#666}
+.moto-stat{background:#0f3460;padding:6px 8px;border-radius:4px;text-align:center;font-size:10px}
+.moto-stat .val{font-size:18px;font-weight:bold;color:#00ff88}
+.moto-stat.warn .val{color:#ffd700}
+.moto-stat.alert .val{color:#e94560}
+.state-badge{display:inline-block;padding:2px 6px;margin:2px;border-radius:3px;font-size:9px;background:#333}
+.state-badge.active{background:#e94560;color:#fff}
 </style>
 </head>
 <body>
@@ -73,6 +82,7 @@ select,input{background:#0f3460;color:#fff;border:1px solid #1a1a2e;padding:4px 
 
 <div class="tabs">
 <button class="tab active" onclick="showTab('live')">实时曲线</button>
+<button class="tab" onclick="showTab('moto')">摩托车</button>
 <button class="tab" onclick="showTab('perf')">性能</button>
 <button class="tab" onclick="showTab('log')">记录</button>
 <button class="tab" onclick="showTab('export')">导出</button>
@@ -152,6 +162,60 @@ select,input{background:#0f3460;color:#fff;border:1px solid #1a1a2e;padding:4px 
 </div>
 </div>
 
+<!-- 摩托车模式页面 -->
+<div class="section" id="moto">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+<div class="lean-gauge">
+<div class="lean-indicator" id="leanNeedle"></div>
+<div class="lean-scale">
+<span style="position:absolute;left:5px">L 60°</span>
+<span style="position:absolute;left:50%;transform:translateX(-50%)">0°</span>
+<span style="position:absolute;right:5px">R 60°</span>
+</div>
+<div style="position:absolute;top:8px;left:50%;transform:translateX(-50%);font-size:24px;font-weight:bold;color:#fff" id="leanVal">0.0°</div>
+<div style="position:absolute;top:38px;left:50%;transform:translateX(-50%);font-size:10px;color:#888">倾角</div>
+</div>
+<div style="display:grid;grid-template-rows:1fr 1fr;gap:6px">
+<div class="moto-stat"><div class="val" id="motoSpeed">0</div><div>速度 km/h</div></div>
+<div class="moto-stat"><div class="val" id="combG">0.00</div><div>合成G力</div></div>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px">
+<div class="moto-stat"><div class="val" id="fwdG">0.00</div><div>前进G</div></div>
+<div class="moto-stat"><div class="val" id="latG">0.00</div><div>侧向G</div></div>
+<div class="moto-stat"><div class="val" id="maxLeanL">0</div><div>最大左倾</div></div>
+<div class="moto-stat"><div class="val" id="maxLeanR">0</div><div>最大右倾</div></div>
+</div>
+
+<div style="background:#0a0a1a;padding:8px;border-radius:6px;margin-bottom:10px">
+<div style="font-size:10px;color:#888;margin-bottom:6px">骑行状态</div>
+<span class="state-badge" id="stAccel">加速</span>
+<span class="state-badge" id="stBrake">刹车</span>
+<span class="state-badge" id="stLean">压弯</span>
+<span class="state-badge" id="stWheelie">翅头</span>
+<span class="state-badge" id="stCorner">弯道</span>
+</div>
+
+<div class="chart-box">
+<div class="chart-title"><span>倾角曲线</span></div>
+<canvas id="leanChart" height="80"></canvas>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px">
+<div class="stats-row"><span class="stats-label">弯道数</span><span class="stats-value" id="cornerCnt">0</span></div>
+<div class="stats-row"><span class="stats-label">翅头数</span><span class="stats-value" id="wheelieCnt">0</span></div>
+<div class="stats-row"><span class="stats-label">最大翅头</span><span class="stats-value" id="maxWheelie">0°</span></div>
+<div class="stats-row"><span class="stats-label">最高速</span><span class="stats-value" id="motoTop">0 km/h</span></div>
+<div class="stats-row"><span class="stats-label">最大合G</span><span class="stats-value" id="maxCombG">0</span></div>
+<div class="stats-row"><span class="stats-label">弯道半径</span><span class="stats-value" id="cornerR">-- m</span></div>
+</div>
+
+<div class="controls" style="margin-top:10px">
+<button class="btn" onclick="resetMotoSession()">重置会话</button>
+</div>
+</div>
+
 <!-- 导出页面 -->
 <div class="section" id="export">
 <h3 style="color:#00ff88;margin-bottom:10px;font-size:13px">数据导出</h3>
@@ -196,6 +260,10 @@ let lastT = Date.now();
 let cnt = 0;
 let timeRange = 60;
 
+// 摩托车模式数据
+let motoChart = {lean:[], ts:[]};
+let lCtx;
+
 // Canvas
 let sCtx, gCtx, pCtx;
 
@@ -203,18 +271,22 @@ window.onload = function() {
     sCtx = document.getElementById('speedChart').getContext('2d');
     gCtx = document.getElementById('gforceChart').getContext('2d');
     pCtx = document.getElementById('previewChart').getContext('2d');
+    lCtx = document.getElementById('leanChart').getContext('2d');
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
     setInterval(fetchData, CFG.interval);
+    setInterval(fetchMotoData, 100); // 摩托车数据更频繁更新
     setInterval(updateUI, 1000);
     draw();
 };
 
 function resizeCanvas() {
-    ['speedChart','gforceChart','previewChart'].forEach(id => {
+    ['speedChart','gforceChart','previewChart','leanChart'].forEach(id => {
         const c = document.getElementById(id);
-        c.width = c.offsetWidth * 2;
-        c.height = parseInt(c.getAttribute('height')) * 2;
+        if(c) {
+            c.width = c.offsetWidth * 2;
+            c.height = parseInt(c.getAttribute('height')) * 2;
+        }
     });
 }
 
@@ -599,6 +671,121 @@ function fmtTime(ms) {
 function fmtDate() {
     const n = new Date();
     return `${n.getFullYear()}${(n.getMonth()+1).toString().padStart(2,'0')}${n.getDate().toString().padStart(2,'0')}_${n.getHours().toString().padStart(2,'0')}${n.getMinutes().toString().padStart(2,'0')}`;
+}
+
+// ========== 摩托车模式 ==========
+function fetchMotoData() {
+    if(tab !== 'moto') return;
+    
+    fetch('/moto').then(r => r.json()).then(d => {
+        updateMotoUI(d);
+    }).catch(() => {});
+}
+
+function updateMotoUI(d) {
+    // 倾角仪表
+    const lean = d.lean.filtered;
+    const needle = document.getElementById('leanNeedle');
+    needle.style.transform = `translateX(-50%) rotate(${lean}deg)`;
+    
+    // 倾角数值
+    const leanDir = lean >= 0 ? 'R' : 'L';
+    document.getElementById('leanVal').textContent = `${leanDir} ${Math.abs(lean).toFixed(1)}°`;
+    
+    // 速度和G力
+    document.getElementById('motoSpeed').textContent = d.speed.toFixed(0);
+    document.getElementById('combG').textContent = d.g.combined.toFixed(2);
+    document.getElementById('fwdG').textContent = d.g.fwd.toFixed(2);
+    document.getElementById('latG').textContent = d.g.lat.toFixed(2);
+    
+    // 最大倾角
+    document.getElementById('maxLeanL').textContent = Math.abs(d.lean.maxL).toFixed(0) + '°';
+    document.getElementById('maxLeanR').textContent = d.lean.maxR.toFixed(0) + '°';
+    
+    // 状态徽章
+    setBadge('stAccel', d.state.accel);
+    setBadge('stBrake', d.state.brake);
+    setBadge('stLean', d.state.lean);
+    setBadge('stWheelie', d.state.wheelie);
+    setBadge('stCorner', d.state.corner);
+    
+    // 统计数据
+    document.getElementById('cornerCnt').textContent = d.corner.count;
+    document.getElementById('wheelieCnt').textContent = d.wheelie.count;
+    document.getElementById('maxWheelie').textContent = d.wheelie.max.toFixed(0) + '°';
+    document.getElementById('motoTop').textContent = d.topSpeed.toFixed(0) + ' km/h';
+    document.getElementById('maxCombG').textContent = d.max.combG.toFixed(2);
+    document.getElementById('cornerR').textContent = d.corner.radius > 0 ? d.corner.radius.toFixed(0) + ' m' : '-- m';
+    
+    // 倾角曲线
+    motoChart.lean.push(lean);
+    motoChart.ts.push(Date.now());
+    while(motoChart.lean.length > 200) {
+        motoChart.lean.shift();
+        motoChart.ts.shift();
+    }
+    drawLeanChart();
+}
+
+function setBadge(id, active) {
+    const el = document.getElementById(id);
+    if(active) el.classList.add('active');
+    else el.classList.remove('active');
+}
+
+function drawLeanChart() {
+    const c = document.getElementById('leanChart');
+    if(!lCtx) return;
+    const w = c.width, h = c.height;
+    
+    lCtx.fillStyle = '#0a0a1a';
+    lCtx.fillRect(0,0,w,h);
+    
+    if(motoChart.lean.length < 2) return;
+    
+    const maxL = 60;
+    
+    // 零线
+    lCtx.strokeStyle = '#333';
+    lCtx.lineWidth = 1;
+    lCtx.beginPath();
+    lCtx.moveTo(0, h/2);
+    lCtx.lineTo(w, h/2);
+    lCtx.stroke();
+    
+    // 刻度线
+    [30, -30].forEach(deg => {
+        const y = h/2 - deg/maxL * (h/2);
+        lCtx.strokeStyle = '#222';
+        lCtx.beginPath();
+        lCtx.moveTo(0, y);
+        lCtx.lineTo(w, y);
+        lCtx.stroke();
+    });
+    
+    // 倾角曲线
+    lCtx.strokeStyle = '#e94560';
+    lCtx.lineWidth = 2;
+    lCtx.beginPath();
+    for(let i=0; i<motoChart.lean.length; i++) {
+        const x = i / (motoChart.lean.length - 1) * w;
+        const y = h/2 - motoChart.lean[i]/maxL * (h/2);
+        i===0 ? lCtx.moveTo(x,y) : lCtx.lineTo(x,y);
+    }
+    lCtx.stroke();
+    
+    // 当前值
+    const cur = motoChart.lean[motoChart.lean.length-1] || 0;
+    lCtx.fillStyle = cur >= 0 ? '#ff8800' : '#0088ff';
+    lCtx.font = 'bold 16px monospace';
+    lCtx.fillText((cur >= 0 ? 'R' : 'L') + Math.abs(cur).toFixed(1) + '°', w - 60, 20);
+}
+
+function resetMotoSession() {
+    if(confirm('重置摩托车会话数据?')) {
+        fetch('/moto?reset=1').catch(() => {});
+        motoChart = {lean:[], ts:[]};
+    }
 }
 </script>
 </body>

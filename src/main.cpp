@@ -56,7 +56,7 @@ const char* ap_password = "12345678";
 // Web服务器
 WebServer server(80);
 
-// 显示模式：0=IMU数据, 1=二维码, 2=GPS数据, 3=性能数据
+// 显示模式：0=IMU数据, 1=二维码, 2=GPS数据, 3=性能数据, 4=摩托车模式
 int display_mode = 1;
 
 // ===== Dragy模式定时配置 =====
@@ -82,6 +82,8 @@ int printMode = 2;
 void updateDisplay();
 void displayGPSData();
 void displayPerformanceData();
+void displayMotorcycleData();
+void handleMotoData();
 void printDataToSerial();
 void handleSerialCommands();
 void scanI2CDevices();
@@ -203,6 +205,66 @@ void handleData() {
     server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     server.sendHeader("Connection", "keep-alive");
     
+    server.send(200, "application/json", json_buffer);
+}
+
+/**
+ * 处理摩托车数据API请求
+ */
+void handleMotoData() {
+    // 更新摩托车数据
+    updateMotorcycleData();
+    
+    char json_buffer[600];
+    
+    sprintf(json_buffer,
+        "{"
+        "\"lean\":{\"current\":%.2f,\"filtered\":%.2f,\"maxL\":%.1f,\"maxR\":%.1f},"
+        "\"g\":{\"fwd\":%.3f,\"lat\":%.3f,\"vert\":%.3f,\"combined\":%.3f},"
+        "\"max\":{\"fwdG\":%.2f,\"brakeG\":%.2f,\"latG\":%.2f,\"combG\":%.2f},"
+        "\"state\":{\"accel\":%s,\"brake\":%s,\"lean\":%s,\"wheelie\":%s,\"stoppie\":%s,\"corner\":%s},"
+        "\"corner\":{\"count\":%d,\"speed\":%.1f,\"g\":%.2f,\"radius\":%.0f},"
+        "\"wheelie\":{\"angle\":%.1f,\"max\":%.1f,\"count\":%d},"
+        "\"speed\":%.1f,"
+        "\"topSpeed\":%.1f,"
+        "\"gyro\":{\"roll\":%.1f,\"pitch\":%.1f,\"yaw\":%.1f},"
+        "\"sats\":%d"
+        "}",
+        moto_data.lean_angle,
+        moto_data.lean_angle_filtered,
+        moto_data.max_lean_left,
+        moto_data.max_lean_right,
+        moto_data.forward_g,
+        moto_data.lateral_g,
+        moto_data.vertical_g,
+        moto_data.combined_g,
+        moto_data.max_forward_g,
+        moto_data.max_brake_g,
+        moto_data.max_lateral_g,
+        moto_data.max_combined_g,
+        moto_data.is_accelerating ? "true" : "false",
+        moto_data.is_braking ? "true" : "false",
+        moto_data.is_leaning ? "true" : "false",
+        moto_data.is_wheelie ? "true" : "false",
+        moto_data.is_stoppie ? "true" : "false",
+        moto_data.in_corner ? "true" : "false",
+        moto_data.corner_count,
+        moto_data.corner_speed,
+        moto_data.corner_g,
+        moto_data.corner_radius_estimate,
+        moto_data.wheelie_angle,
+        moto_data.max_wheelie_angle,
+        moto_data.wheelie_count,
+        gps_data.valid_speed ? gps_data.speed_kmh : 0.0,
+        moto_data.top_speed,
+        moto_data.roll_rate,
+        moto_data.pitch_rate,
+        moto_data.yaw_rate,
+        gps_data.satellites
+    );
+    
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    server.sendHeader("Connection", "keep-alive");
     server.send(200, "application/json", json_buffer);
 }
 
@@ -510,6 +572,10 @@ void setup() {
   Serial.println("初始化性能分析器...");
   initPerformanceAnalyzer();
   
+  // 初始化摩托车模式
+  Serial.println("初始化摩托车模式...");
+  initMotorcycleMode();
+  
   // 初始化OLED显示屏
   Serial.println("初始化OLED显示屏...");
   if (display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
@@ -570,6 +636,7 @@ void setup() {
   // 配置Web服务器路由
   server.on("/", handleRoot);
   server.on("/data", handleData);
+  server.on("/moto", handleMotoData);  // 摩托车数据端点
   server.begin();
   Serial.println("Web服务器已启动!");
   Serial.println("");
@@ -589,7 +656,7 @@ void loop() {
   static bool lastBootState = HIGH;
   bool currentBootState = digitalRead(0);
   if (lastBootState == HIGH && currentBootState == LOW) {
-    display_mode = (display_mode + 1) % 4; // 切换显示模式: 0=IMU, 1=二维码, 2=GPS, 3=性能
+    display_mode = (display_mode + 1) % 5; // 切换显示模式: 0=IMU, 1=二维码, 2=GPS, 3=性能, 4=摩托车
     delay(200); // 防抖
   }
   lastBootState = currentBootState;
@@ -627,6 +694,8 @@ void loop() {
       displayGPSData(); // 显示GPS数据
     } else if (display_mode == 3) {
       displayPerformanceData(); // 显示性能数据
+    } else if (display_mode == 4) {
+      displayMotorcycleData(); // 显示摩托车数据
     }
     
     printDataToSerial();
@@ -711,6 +780,79 @@ void displayPerformanceData() {
                 fused_data.session_max_accel_g,
                 fused_data.session_max_brake_g,
                 fused_data.session_max_lateral_g);
+  
+  display.display();
+}
+
+/**
+ * 显示摩托车数据 (display_mode = 4)
+ */
+void displayMotorcycleData() {
+  // 更新摩托车数据
+  updateMotorcycleData();
+  
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  
+  // 标题栏
+  display.setCursor(0, 0);
+  display.print("MOTO MODE ");
+  
+  // 显示状态图标
+  if (moto_data.is_wheelie) display.print("W!");
+  else if (moto_data.is_stoppie) display.print("S!");
+  else if (moto_data.is_leaning) display.print(">");
+  else if (moto_data.is_braking) display.print("B");
+  else if (moto_data.is_accelerating) display.print("A");
+  
+  // GPS状态
+  display.setCursor(100, 0);
+  display.printf("%dS", gps_data.satellites);
+  
+  // === 大字体显示倾角 ===
+  display.setTextSize(2);
+  display.setCursor(0, 10);
+  
+  // 倾角显示
+  float lean = moto_data.lean_angle_filtered;
+  if (lean >= 0) {
+    display.printf("R%4.1f", lean);  // 右倾
+  } else {
+    display.printf("L%4.1f", -lean); // 左倾
+  }
+  display.setTextSize(1);
+  display.setCursor(80, 10);
+  display.print("deg");
+  
+  // 速度显示
+  display.setCursor(80, 18);
+  display.printf("%.0fkm/h", gps_data.speed_kmh);
+  
+  // === 第三行: G力数据 ===
+  display.setCursor(0, 28);
+  display.printf("Fwd:%.2fG Lat:%.2fG", moto_data.forward_g, moto_data.lateral_g);
+  
+  // === 第四行: 弯道信息 ===
+  display.setCursor(0, 38);
+  if (moto_data.in_corner) {
+    display.printf("Corner! G:%.2f R:%.0fm", moto_data.corner_g, moto_data.corner_radius_estimate);
+  } else {
+    display.printf("Corners:%d Wheelie:%d", moto_data.corner_count, moto_data.wheelie_count);
+  }
+  
+  // === 第五行: 峰值记录 ===
+  display.setCursor(0, 48);
+  display.printf("MaxL:%.0f/%.0f MaxG:%.1f", 
+                -moto_data.max_lean_left, 
+                moto_data.max_lean_right, 
+                moto_data.max_combined_g);
+  
+  // === 第六行: 最高速度 ===
+  display.setCursor(0, 56);
+  display.printf("Top:%.1fkm/h W:%.0fdeg", 
+                moto_data.top_speed,
+                moto_data.max_wheelie_angle);
   
   display.display();
 }

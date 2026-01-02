@@ -43,6 +43,60 @@ struct FUSED_PERFORMANCE_DATA {
     unsigned long session_duration = 0;
 };
 
+// ===== 摩托车模式数据结构 =====
+struct MOTORCYCLE_DATA {
+    // 倾角数据 (压弯角度)
+    double lean_angle = 0.0;           // 当前倾斜角度 (度, 正=右倾, 负=左倾)
+    double lean_angle_filtered = 0.0;  // 滤波后倾角
+    double max_lean_left = 0.0;        // 会话最大左倾角
+    double max_lean_right = 0.0;       // 会话最大右倾角
+    
+    // 加速度数据
+    double forward_g = 0.0;            // 前进方向G力 (加速/减速)
+    double lateral_g = 0.0;            // 侧向G力 (转弯离心力)
+    double vertical_g = 0.0;           // 垂直G力 (颠簸/跳跃)
+    double combined_g = 0.0;           // 合成G力
+    
+    // 弯道分析
+    double corner_speed = 0.0;         // 入弯速度
+    double corner_g = 0.0;             // 弯道G力
+    double corner_radius_estimate = 0.0; // 估算弯道半径(m)
+    bool in_corner = false;            // 是否在弯道中
+    int corner_count = 0;              // 弯道计数
+    
+    // 骑行状态
+    bool is_accelerating = false;      // 加速中
+    bool is_braking = false;           // 刹车中
+    bool is_leaning = false;           // 压弯中
+    bool is_wheelie = false;           // 抬头(前轮离地)
+    bool is_stoppie = false;           // 翘尾(后轮离地)
+    
+    // 峰值记录
+    double max_forward_g = 0.0;        // 最大加速G
+    double max_brake_g = 0.0;          // 最大刹车G
+    double max_lateral_g = 0.0;        // 最大侧向G
+    double max_combined_g = 0.0;       // 最大合成G
+    double top_speed = 0.0;            // 最高时速
+    
+    // 翘头/翘尾检测
+    double wheelie_angle = 0.0;        // 翘头角度
+    double max_wheelie_angle = 0.0;    // 最大翘头角度
+    int wheelie_count = 0;             // 翘头次数
+    
+    // 陀螺仪数据
+    double roll_rate = 0.0;            // 横滚角速度 (deg/s)
+    double pitch_rate = 0.0;           // 俯仰角速度 (deg/s)
+    double yaw_rate = 0.0;             // 偏航角速度 (deg/s)
+    
+    // 数据质量
+    bool data_valid = false;
+    unsigned long last_update = 0;
+};
+
+// 摩托车模式全局数据
+extern MOTORCYCLE_DATA moto_data;
+extern bool motorcycle_mode_enabled;
+
 // 全局融合数据对象
 extern FUSED_PERFORMANCE_DATA fused_data;
 
@@ -56,6 +110,14 @@ void calibrateIMUForVehicle();
 void resetSessionData();
 void printFusedData();
 
+// ===== 摩托车模式函数 =====
+void initMotorcycleMode();
+void updateMotorcycleData();
+void calculateLeanAngle();
+void detectWheelieStoppie();
+void analyzeCorner();
+void resetMotorcycleSession();
+
 // 性能事件检测
 bool detectLaunchStart();
 bool detectBrakingStart();
@@ -68,5 +130,4 @@ bool validateFusedData();
 
 // 功率估算 (基于加速度和速度)
 double estimatePower();
-
 #endif
