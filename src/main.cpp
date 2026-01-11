@@ -26,6 +26,7 @@
 #include "mpu6050.h"
 #include "gps_module.h"
 #include "performance_analyzer.h"
+#include "audio_recorder.h"
 
 // I²C双路总线引脚定义
 // I2C0 - MPU6050传感器
@@ -84,6 +85,9 @@ void displayGPSData();
 void displayPerformanceData();
 void displayMotorcycleData();
 void handleMotoData();
+void handleAudioData();
+void handleAudioControl();
+void handleAudioDownload();
 void printDataToSerial();
 void handleSerialCommands();
 void scanI2CDevices();
@@ -266,6 +270,132 @@ void handleMotoData() {
     server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     server.sendHeader("Connection", "keep-alive");
     server.send(200, "application/json", json_buffer);
+}
+
+/**
+ * 处理录音状态API请求
+ */
+void handleAudioData() {
+    char json_buffer[400];
+    
+    const char* stateStr = "idle";
+    switch (audio_data.state) {
+        case RECORDING_IDLE: stateStr = "idle"; break;
+        case RECORDING_WAITING: stateStr = "waiting"; break;
+        case RECORDING_ACTIVE: stateStr = "recording"; break;
+        case RECORDING_PAUSED: stateStr = "paused"; break;
+        case RECORDING_STOPPED: stateStr = "stopped"; break;
+    }
+    
+    sprintf(json_buffer,
+        "{"
+        "\"state\":\"%s\","
+        "\"filename\":\"%s\","
+        "\"duration\":%.1f,"
+        "\"fileSize\":%lu,"
+        "\"volume\":%d,"
+        "\"peakVolume\":%d,"
+        "\"autoRecord\":%s,"
+        "\"storage\":{"
+            "\"total\":%lu,"
+            "\"used\":%lu,"
+            "\"free\":%lu"
+        "},"
+        "\"error\":%s,"
+        "\"errorMsg\":\"%s\""
+        "}",
+        stateStr,
+        audio_data.filename,
+        audio_data.duration_ms / 1000.0,
+        audio_data.file_size,
+        audio_data.current_volume,
+        audio_data.peak_volume,
+        audio_data.auto_record_on_ride ? "true" : "false",
+        audio_data.spiffs_total,
+        audio_data.spiffs_used,
+        audio_data.spiffs_free,
+        audio_data.error ? "true" : "false",
+        audio_data.error_msg
+    );
+    
+    server.sendHeader("Cache-Control", "no-cache");
+    server.send(200, "application/json", json_buffer);
+}
+
+/**
+ * 处理录音控制API请求
+ * 参数: action = start | stop | pause | resume | delete | toggle_auto
+ */
+void handleAudioControl() {
+    String action = server.arg("action");
+    String response = "{\"success\":true,\"message\":\"";
+    
+    if (action == "start") {
+        if (startRecording()) {
+            response += "录音已开始\"}";
+        } else {
+            response = "{\"success\":false,\"message\":\"";
+            response += audio_data.error_msg;
+            response += "\"}";
+        }
+    } else if (action == "stop") {
+        stopRecording();
+        response += "录音已停止\"}";
+    } else if (action == "pause") {
+        pauseRecording();
+        response += "录音已暂停\"}";
+    } else if (action == "resume") {
+        resumeRecording();
+        response += "录音已恢复\"}";
+    } else if (action == "delete") {
+        deleteAllRecordings();
+        response += "所有录音已删除\"}";
+    } else if (action == "toggle_auto") {
+        audio_data.auto_record_on_ride = !audio_data.auto_record_on_ride;
+        response += audio_data.auto_record_on_ride ? "自动录音已开启\"}" : "自动录音已关闭\"}";
+    } else if (action == "list") {
+        // 返回录音列表
+        String list = getRecordingsList();
+        server.send(200, "application/json", list);
+        return;
+    } else {
+        response = "{\"success\":false,\"message\":\"未知操作\"}";
+    }
+    
+    server.send(200, "application/json", response);
+}
+
+/**
+ * 处理录音文件下载
+ * 参数: file = 文件名
+ */
+void handleAudioDownload() {
+    String filename = server.arg("file");
+    if (filename.length() == 0) {
+        server.send(400, "text/plain", "Missing file parameter");
+        return;
+    }
+    
+    // 确保文件名以/开头
+    if (!filename.startsWith("/")) {
+        filename = "/" + filename;
+    }
+    
+    if (!SPIFFS.exists(filename)) {
+        server.send(404, "text/plain", "File not found");
+        return;
+    }
+    
+    File file = SPIFFS.open(filename, "r");
+    if (!file) {
+        server.send(500, "text/plain", "Cannot open file");
+        return;
+    }
+    
+    // 设置下载头
+    server.sendHeader("Content-Disposition", "attachment; filename=" + filename.substring(1));
+    server.streamFile(file, "audio/wav");
+    file.close();
 }
 
 void displayQRCode() {
@@ -576,6 +706,10 @@ void setup() {
   Serial.println("初始化摩托车模式...");
   initMotorcycleMode();
   
+  // 初始化录音模块
+  Serial.println("初始化录音模块...");
+  initAudioRecorder();
+  
   // 初始化OLED显示屏
   Serial.println("初始化OLED显示屏...");
   if (display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
@@ -637,6 +771,9 @@ void setup() {
   server.on("/", handleRoot);
   server.on("/data", handleData);
   server.on("/moto", handleMotoData);  // 摩托车数据端点
+  server.on("/audio", handleAudioData);  // 录音状态端点
+  server.on("/audio/control", handleAudioControl);  // 录音控制端点
+  server.on("/audio/download", handleAudioDownload);  // 录音下载端点
   server.begin();
   Serial.println("Web服务器已启动!");
   Serial.println("");
@@ -680,6 +817,9 @@ void loop() {
     updateGPSData(); // 10Hz更新GPS数据
     lastGPSTime = currentTime;
   }
+  
+  // ===== 录音模块更新 (持续) =====
+  updateAudioRecorder();  // 处理音频采样和自动录音触发
   
   // ===== 显示和融合更新 (20Hz) =====
   if (currentTime - lastUpdateTime >= UPDATE_INTERVAL) {
@@ -795,11 +935,19 @@ void displayMotorcycleData() {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   
-  // 标题栏
+  // 标题栏 - 包含录音状态
   display.setCursor(0, 0);
-  display.print("MOTO MODE ");
+  display.print("MOTO ");
+  
+  // 录音状态指示
+  if (audio_data.state == RECORDING_ACTIVE) {
+    display.print("[REC]");  // 正在录音
+  } else if (audio_data.auto_record_on_ride) {
+    display.print("[AUTO]"); // 自动录音待命
+  }
   
   // 显示状态图标
+  display.setCursor(70, 0);
   if (moto_data.is_wheelie) display.print("W!");
   else if (moto_data.is_stoppie) display.print("S!");
   else if (moto_data.is_leaning) display.print(">");
@@ -841,12 +989,19 @@ void displayMotorcycleData() {
     display.printf("Corners:%d Wheelie:%d", moto_data.corner_count, moto_data.wheelie_count);
   }
   
-  // === 第五行: 峰值记录 ===
+  // === 第五行: 录音信息或峰值记录 ===
   display.setCursor(0, 48);
-  display.printf("MaxL:%.0f/%.0f MaxG:%.1f", 
-                -moto_data.max_lean_left, 
-                moto_data.max_lean_right, 
-                moto_data.max_combined_g);
+  if (audio_data.state == RECORDING_ACTIVE) {
+    // 显示录音信息
+    display.printf("REC %.0fs Vol:%d", 
+                  audio_data.duration_ms / 1000.0,
+                  audio_data.current_volume);
+  } else {
+    display.printf("MaxL:%.0f/%.0f MaxG:%.1f", 
+                  -moto_data.max_lean_left, 
+                  moto_data.max_lean_right, 
+                  moto_data.max_combined_g);
+  }
   
   // === 第六行: 最高速度 ===
   display.setCursor(0, 56);
