@@ -76,17 +76,30 @@ void updateGPSData() {
     static unsigned long last_reconnect_attempt = 0;
     static int signal_lost_count = 0;
     static bool was_connected = false;
+    static unsigned long last_raw_print = 0;
     
     unsigned long current_time = millis();
     
-    // 读取GPS数据
+    // 读取GPS数据并打印原始NMEA（每2秒打印一次用于调试）
     bool got_new_data = false;
+    String nmea_buffer = "";
     while (gpsSerial.available() > 0) {
-        if (gps.encode(gpsSerial.read())) {
+        char c = gpsSerial.read();
+        nmea_buffer += c;
+        if (gps.encode(c)) {
             got_new_data = true;
             last_gps_data_time = current_time;
             signal_lost_count = 0;
         }
+    }
+    
+    // 每5秒打印一次原始GPS数据用于调试
+    if (nmea_buffer.length() > 0 && current_time - last_raw_print > 5000) {
+        Serial.println("\n=== GPS原始NMEA数据 ===");
+        Serial.print(nmea_buffer);
+        Serial.printf("字节数: %d, 卫星数(parsed): %d\n", nmea_buffer.length(), gps.satellites.value());
+        Serial.println("========================\n");
+        last_raw_print = current_time;
     }
     
     // GPS信号监控和恢复
