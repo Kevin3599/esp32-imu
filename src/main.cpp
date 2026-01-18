@@ -27,6 +27,7 @@
 #include "gps_module.h"
 #include "performance_analyzer.h"
 #include "audio_recorder.h"
+#include "sd_logger.h"
 
 // I²C双路总线引脚定义
 // I2C0 - MPU6050传感器
@@ -598,18 +599,58 @@ void handleSerialCommands() {
     }
     else if (command.equalsIgnoreCase("help") || command == "?") {
       Serial.println("");
-      Serial.println("⚙️  === MPU6050 串口打印模式选择 ===");
-      Serial.println("📡 0 或 'brief'    - 简要模式 (高频率简洁输出)");
-      Serial.println("📊 1 或 'detailed' - 详细模式 (低频率详细输出)");
-      Serial.println("🔄 2 或 'mixed'    - 混合模式 (简要+定期详细)");
-      Serial.println("🌡️ 'temp'           - 单次温度查询");
-      Serial.println("❓ 'help' 或 '?'    - 显示此帮助");
-      Serial.println("⚙️  ===============================");
-      Serial.printf("🔄 当前模式: %d\n", printMode);
+      Serial.println("⚙️  === ESP32 IMU 串口命令 ===");
+      Serial.println("📡 0 或 'brief'    - 简要模式");
+      Serial.println("📊 1 或 'detailed' - 详细模式");
+      Serial.println("🔄 2 或 'mixed'    - 混合模式");
+      Serial.println("🌡️ 'temp'          - 温度查询");
+      Serial.println("");
+      Serial.println("💾 === SD卡命令 ===");
+      Serial.println("📂 'sd'            - SD卡状态");
+      Serial.println("📋 'list'          - 列出记录文件");
+      Serial.println("🔴 'rec'           - 开始/停止记录");
+      Serial.println("❓ 'help'          - 显示此帮助");
+      Serial.println("================================");
+      Serial.printf("🔄 当前打印模式: %d\n", printMode);
+      Serial.printf("💾 SD卡: %s\n", sd_status.initialized ? "已初始化" : "未初始化");
+      Serial.printf("🔴 记录: %s\n", sd_status.logging ? "进行中" : "停止");
       Serial.println("");
     }
     else if (command.equalsIgnoreCase("temp")) {
       Serial.printf("🌡️ 当前温度: %.2f°C\n", mpu6050_data.Temperature);
+    }
+    // ===== SD卡命令 =====
+    else if (command.equalsIgnoreCase("sd")) {
+      Serial.println("\n=== SD卡状态 ===");
+      if (sd_status.initialized) {
+        Serial.printf("状态: ✅ 已初始化\n");
+        Serial.printf("总容量: %.2f GB\n", sd_status.total_bytes / (1024.0 * 1024.0 * 1024.0));
+        Serial.printf("已用: %.2f MB\n", sd_status.used_bytes / (1024.0 * 1024.0));
+        Serial.printf("剩余: %.2f GB\n", sd_status.free_bytes / (1024.0 * 1024.0 * 1024.0));
+        Serial.printf("记录状态: %s\n", sd_status.logging ? "🔴 记录中" : "⬛ 停止");
+        if (sd_status.logging) {
+          Serial.printf("当前文件: %s\n", sd_status.current_file.c_str());
+          Serial.printf("数据点数: %lu\n", sd_status.data_points);
+          Serial.printf("文件大小: %.2f KB\n", sd_status.file_size / 1024.0);
+        }
+      } else {
+        Serial.println("状态: ❌ 未初始化");
+        Serial.println("请检查SD卡接线和格式");
+      }
+      Serial.println("================\n");
+    }
+    else if (command.equalsIgnoreCase("list")) {
+      listLogFiles();
+    }
+    else if (command.equalsIgnoreCase("rec")) {
+      if (sd_status.logging) {
+        stopLogging();
+        Serial.println("⬛ 已手动停止记录");
+      } else {
+        if (startLogging()) {
+          Serial.println("🔴 已手动开始记录");
+        }
+      }
     }
     else {
       Serial.println("❌ 未知命令，输入 'help' 查看帮助");
@@ -709,6 +750,12 @@ void setup() {
   // 初始化录音模块
   Serial.println("初始化录音模块...");
   initAudioRecorder();
+  
+  // 初始化SD卡
+  Serial.println("初始化SD卡...");
+  if (initSDCard()) {
+    listLogFiles();  // 列出已有的记录文件
+  }
   
   // 初始化OLED显示屏
   Serial.println("初始化OLED显示屏...");
@@ -815,6 +862,35 @@ void loop() {
   // ===== GPS数据处理 (10Hz) =====
   if (currentTime - lastGPSTime >= GPS_INTERVAL) {
     updateGPSData(); // 10Hz更新GPS数据
+    
+    // ===== SD卡数据记录 (10Hz) =====
+    // 自动检测是否应该开始/停止记录
+    checkAutoLogging(fused_data.current_speed_kmh);
+    
+    // 如果正在记录，保存数据点
+    if (sd_status.logging) {
+      RideDataPoint dp;
+      dp.timestamp = currentTime;
+      dp.latitude = gps_data.latitude;
+      dp.longitude = gps_data.longitude;
+      dp.speed_kmh = gps_data.speed_kmh;
+      dp.altitude = gps_data.altitude;
+      dp.satellites = gps_data.satellites;
+      dp.hdop = gps_data.hdop;
+      dp.accel_x = mpu6050_data.Acc_X;
+      dp.accel_y = mpu6050_data.Acc_Y;
+      dp.accel_z = mpu6050_data.Acc_Z;
+      dp.gyro_x = mpu6050_data.Angle_Velocity_R;
+      dp.gyro_y = mpu6050_data.Angle_Velocity_P;
+      dp.gyro_z = mpu6050_data.Angle_Velocity_Y;
+      dp.roll = mpu6050_data.Roll;
+      dp.pitch = mpu6050_data.Pitch;
+      dp.forward_g = fused_data.current_accel_g;
+      dp.lateral_g = fused_data.current_lateral_g;
+      dp.fused_speed = fused_data.current_speed_kmh;
+      logDataPoint(dp);
+    }
+    
     lastGPSTime = currentTime;
   }
   
