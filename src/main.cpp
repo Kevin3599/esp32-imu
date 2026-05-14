@@ -35,7 +35,7 @@
 #define I2C0_SCL 22    // MPU6050 SCL引脚
 
 // I2C1 - OLED显示屏
-#define I2C1_SDA 18    // OLED SDA引脚  
+#define I2C1_SDA 18    // OLED SDA引脚
 #define I2C1_SCL 19    // OLED SCL引脚
 
 // OLED显示屏配置
@@ -751,11 +751,13 @@ void setup() {
   Serial.println("初始化录音模块...");
   initAudioRecorder();
   
+  // 暂时禁用SD卡初始化来测试I2C问题
   // 初始化SD卡
-  Serial.println("初始化SD卡...");
-  if (initSDCard()) {
-    listLogFiles();  // 列出已有的记录文件
-  }
+  // Serial.println("初始化SD卡...");
+  // if (initSDCard()) {
+  //   listLogFiles();  // 列出已有的记录文件
+  // }
+  Serial.println("SD卡初始化已跳过(测试模式)");
   
   // 初始化OLED显示屏
   Serial.println("初始化OLED显示屏...");
