@@ -12,7 +12,8 @@ This folder contains a parametric `OpenSCAD` enclosure for the PCB described by
 ## Files
 
 - `pcb1_enclosure.scad`: two-piece printable enclosure with a base, lid, board
-  support ring, inferred component keepouts, and simple edge retainers.
+  support ring, inferred component keepouts, simple edge retainers, and
+  external screw-ear shell fastening.
 
 ## Design assumptions
 
@@ -25,6 +26,9 @@ This folder contains a parametric `OpenSCAD` enclosure for the PCB described by
   locations on the assembled board.
 - The lid now includes local relief pockets above the main component regions so
   you can keep the overall shell height reasonable while still clearing modules.
+- The upper and lower shells are fastened with four external screw ears so the
+  enclosure can still lock together even though the PCB itself has no mounting
+  holes.
 
 ## Quick use
 
@@ -46,6 +50,10 @@ This folder contains a parametric `OpenSCAD` enclosure for the PCB described by
 - `east_cutouts`
 - `west_cutouts`
 - `component_clearance_gap`
+- `use_fastening_ears`
+- `screw_clearance_diameter`
+- `screw_pilot_diameter`
+- `screw_head_diameter`
 
 ## Notes
 
@@ -56,4 +64,7 @@ This folder contains a parametric `OpenSCAD` enclosure for the PCB described by
   final metrology source.
 - `use_pressure_pads` is disabled by default to avoid colliding with tall
   modules until the exact assembled height is measured.
+- The default fastening geometry is sized for roughly M3 hardware or similar
+  self-tapping screws. Tweak the screw diameters if you plan to use inserts or
+  machine screws instead.
 - The support ring can be widened if the PCB has heavy modules near its center.
