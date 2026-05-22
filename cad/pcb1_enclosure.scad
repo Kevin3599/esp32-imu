@@ -3,7 +3,7 @@
   Board outline: 78.867 mm x 70.866 mm with 5.08 mm corner radius.
 */
 
-$fn = 64;
+$fn = $preview ? 32 : 64;  // fast preview, high-res render
 
 show_mode = "assembled";  // assembled, exploded, base, lid, pcb
 export_mode = 0;  // 0=use show_mode, 1=base, 2=lid, 3=exploded, 4=pcb
@@ -20,14 +20,29 @@ fit_gap = 0.35;
 board_edge_gap = 0.8;
 underside_clearance = 3.0;
 topside_clearance = 18.0;
-wall_thickness = 2.2;
+wall_thickness = 2.4;       // 6 × 0.4 mm nozzle walls
 floor_thickness = 2.4;
-lid_top_thickness = 2.2;
+lid_top_thickness = 2.4;    // matches floor_thickness
 lid_clearance = 0.45;
 lid_wall_thickness = 2.0;
 lid_overlap_height = 6.0;
 lid_wall_height = topside_clearance + lid_overlap_height + 1.0;
 corner_relief = 0.6;
+
+// Shell fastening: external screw ears avoid stealing the PCB interior space.
+use_fastening_ears = true;
+ear_radius = 4.8;
+ear_offset = 4.2;
+ear_bridge_radius = 3.2;
+ear_bridge_pull = 0.72;
+ear_bridge_inset = 7.8;
+base_boss_diameter = 8.4;
+base_boss_pad_radius = 5.0;
+lid_ear_wall = 2.0;
+screw_clearance_diameter = 3.4;
+screw_pilot_diameter = 2.6;
+screw_head_diameter = 6.4;
+screw_head_depth = 2.2;
 
 // Internal support geometry for a hole-free PCB.
 support_ring_width = 3.0;
@@ -38,10 +53,17 @@ retainer_inset = 11.0;
 retainer_gap = 0.4;
 
 // Optional lid pressure pads that keep the PCB seated.
-use_pressure_pads = false;
+use_pressure_pads = true;
 pressure_pad_height = 1.5;
 pressure_pad_diameter = 8.0;
 component_clearance_gap = 1.2;
+
+// Ventilation slots cut into the lid east/west outer walls.
+use_vent_slots   = true;
+vent_slot_width  = 2.2;   // slot opening in Y (mm)
+vent_slot_height = 8.0;   // slot opening in Z (mm)
+vent_slot_pitch  = 6.5;   // centre-to-centre spacing (mm)
+vent_slot_count  = 5;     // slots per wall pair
 
 // Edge cutouts in the base, described as [center,width,height].
 // Defaults are inferred from the PCB probe and silkscreen data.
@@ -86,6 +108,13 @@ active_mode = export_mode == 1 ? "base"
     : export_mode == 4 ? "pcb"
     : show_mode;
 
+ear_positions = [
+    [-ear_offset, -ear_offset],
+    [outer_length + ear_offset, -ear_offset],
+    [-ear_offset, outer_width + ear_offset],
+    [outer_length + ear_offset, outer_width + ear_offset]
+];
+
 module rounded_rect_2d(length, width, radius) {
     hull() {
         for (x = [radius, length - radius])
@@ -98,14 +127,99 @@ module shell_outer_2d() {
     rounded_rect_2d(outer_length, outer_width, outer_corner_radius);
 }
 
+module ear_bridge_anchor_pair(x_side, y_side) {
+    translate([
+        x_side < 0 ? ear_bridge_inset : outer_length - ear_bridge_inset,
+        y_side < 0 ? outer_corner_radius * ear_bridge_pull : outer_width - outer_corner_radius * ear_bridge_pull
+    ])
+        circle(r = ear_bridge_radius);
+
+    translate([
+        x_side < 0 ? outer_corner_radius * ear_bridge_pull : outer_length - outer_corner_radius * ear_bridge_pull,
+        y_side < 0 ? ear_bridge_inset : outer_width - ear_bridge_inset
+    ])
+        circle(r = ear_bridge_radius);
+}
+
+module fastening_ears_2d() {
+    if (use_fastening_ears) {
+        for (pos = ear_positions)
+            hull() {
+                translate(pos) circle(r = ear_radius);
+                ear_bridge_anchor_pair(pos[0], pos[1]);
+            }
+    }
+}
+
+module shell_with_ears_2d() {
+    union() {
+        shell_outer_2d();
+        fastening_ears_2d();
+    }
+}
+
+module base_boss_tabs_2d() {
+    if (use_fastening_ears) {
+        for (pos = ear_positions)
+            hull() {
+                translate(pos) circle(r = base_boss_pad_radius);
+                ear_bridge_anchor_pair(pos[0], pos[1]);
+            }
+    }
+}
+
+module lid_bridge_anchor_pair(x_side, y_side) {
+    translate([
+        x_side < 0 ? lid_origin_x + ear_bridge_inset : lid_origin_x + lid_outer_length - ear_bridge_inset,
+        y_side < 0 ? lid_origin_y + lid_outer_radius * ear_bridge_pull : lid_origin_y + lid_outer_width - lid_outer_radius * ear_bridge_pull
+    ])
+        circle(r = ear_bridge_radius + lid_ear_wall * 0.35);
+
+    translate([
+        x_side < 0 ? lid_origin_x + lid_outer_radius * ear_bridge_pull : lid_origin_x + lid_outer_length - lid_outer_radius * ear_bridge_pull,
+        y_side < 0 ? lid_origin_y + ear_bridge_inset : lid_origin_y + lid_outer_width - ear_bridge_inset
+    ])
+        circle(r = ear_bridge_radius + lid_ear_wall * 0.35);
+}
+
+module lid_fastening_ears_2d() {
+    if (use_fastening_ears) {
+        for (pos = ear_positions)
+            hull() {
+                translate(pos) circle(r = ear_radius + lid_ear_wall);
+                lid_bridge_anchor_pair(pos[0], pos[1]);
+            }
+    }
+}
+
 module lid_outer_2d() {
-    translate([lid_origin_x, lid_origin_y])
-        rounded_rect_2d(lid_outer_length, lid_outer_width, lid_outer_radius);
+    union() {
+        translate([lid_origin_x, lid_origin_y])
+            rounded_rect_2d(lid_outer_length, lid_outer_width, lid_outer_radius);
+
+        lid_fastening_ears_2d();
+    }
 }
 
 module lid_inner_2d() {
     translate([-lid_clearance, -lid_clearance])
         rounded_rect_2d(lid_inner_length, lid_inner_width, lid_inner_radius);
+}
+
+module ear_holes(diameter, height) {
+    if (use_fastening_ears) {
+        for (pos = ear_positions)
+            translate([pos[0], pos[1], -0.05])
+                cylinder(h = height + 0.1, d = diameter);
+    }
+}
+
+module screw_counterbores() {
+    if (use_fastening_ears) {
+        for (pos = ear_positions)
+            translate([pos[0], pos[1], lid_wall_height + lid_top_thickness - screw_head_depth])
+                cylinder(h = screw_head_depth + 0.05, d = screw_head_diameter);
+    }
 }
 
 module board_outline_2d(clearance = 0) {
@@ -200,8 +314,14 @@ module support_ring() {
 }
 
 module board_retainer(px, py) {
+    // Lead-in chamfer on top so the PCB slides in without snagging.
+    ch = min(retainer_height * 0.35, 1.0);
     translate([px, py, board_seat_z + board_thickness - 0.2])
-        cube([retainer_width, retainer_width, retainer_height]);
+        hull() {
+            cube([retainer_width, retainer_width, retainer_height - ch + 0.001]);
+            translate([ch, ch, retainer_height - ch])
+                cube([retainer_width - 2 * ch, retainer_width - 2 * ch, ch]);
+        }
 }
 
 module retainers() {
@@ -225,13 +345,47 @@ module lid_pressure_pads() {
     }
 }
 
+// Ventilation slots through the lid east and west outer walls.
+// Slots are centred in the free-air zone above the lid overlap skirt.
+module lid_vent_slots() {
+    if (use_vent_slots) {
+        vent_z_center = (lid_overlap_height + lid_wall_height) / 2;
+        slot_span     = (vent_slot_count - 1) * vent_slot_pitch;
+        y_start       = lid_origin_y + (lid_outer_width - slot_span) / 2;
+        for (i = [0 : vent_slot_count - 1]) {
+            y_pos = y_start + i * vent_slot_pitch;
+            // West outer wall
+            translate([lid_origin_x - 0.1,
+                       y_pos - vent_slot_width / 2,
+                       vent_z_center - vent_slot_height / 2])
+                cube([lid_wall_thickness + 0.2, vent_slot_width, vent_slot_height]);
+            // East outer wall
+            translate([lid_origin_x + lid_outer_length - lid_wall_thickness - 0.1,
+                       y_pos - vent_slot_width / 2,
+                       vent_z_center - vent_slot_height / 2])
+                cube([lid_wall_thickness + 0.2, vent_slot_width, vent_slot_height]);
+        }
+    }
+}
+
+module base_fastening_bosses() {
+    if (use_fastening_ears) {
+        for (pos = ear_positions)
+            translate([pos[0], pos[1], floor_thickness])
+                cylinder(h = base_height - floor_thickness, d = base_boss_diameter);
+    }
+}
+
 module base_shell() {
     difference() {
         union() {
             linear_extrude(base_height)
                 shell_outer_2d();
+            linear_extrude(base_height)
+                base_boss_tabs_2d();
             support_ring();
             retainers();
+            base_fastening_bosses();
         }
 
         translate([0, 0, floor_thickness])
@@ -252,6 +406,7 @@ module base_shell() {
         edge_cutouts("south", south_cutouts);
         edge_cutouts("east", east_cutouts);
         edge_cutouts("west", west_cutouts);
+        ear_holes(screw_pilot_diameter, base_height);
     }
 }
 
@@ -273,6 +428,9 @@ module lid_shell() {
         }
 
         lid_relief_pockets();
+        ear_holes(screw_clearance_diameter, lid_total_height);
+        screw_counterbores();
+        lid_vent_slots();
     }
 }
 
