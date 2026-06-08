@@ -1,0 +1,725 @@
+% !TEX program = xelatex
+% ESP32 IMU + GPS 项目 —— 面试技术答辩笔记（模拟面试 Q&A 形式）
+\documentclass[UTF8,11pt,a4paper]{ctexart}
+
+% ---------------- 基础包 ----------------
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\usepackage[colorlinks=true,linkcolor=teal!70!black,urlcolor=blue!70!black]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+
+% ---------------- 页眉页脚 ----------------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small ESP32 IMU + GPS 项目 · 面试技术答辩}
+\fancyhead[R]{\small \leftmark}
+\fancyfoot[C]{\small \thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ---------------- 章节样式 ----------------
+\titleformat{\section}
+  {\Large\bfseries\color{teal!60!black}}{\thesection}{0.6em}{}
+\titleformat{\subsection}
+  {\large\bfseries\color{teal!50!black}}{\thesubsection}{0.5em}{}
+
+% ---------------- 代码样式（仅在必要时使用）----------------
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{codecomment}{RGB}{106,153,85}
+\definecolor{codekeyword}{RGB}{0,0,180}
+\definecolor{codestring}{RGB}{163,21,21}
+\lstdefinestyle{cpp}{
+  language=C++,
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  commentstyle=\color{codecomment}\itshape,
+  keywordstyle=\color{codekeyword}\bfseries,
+  stringstyle=\color{codestring},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  framesep=4pt,
+  xleftmargin=1em,
+}
+\lstset{style=cpp}
+
+% ---------------- 自定义 Q&A 框 ----------------
+\newtcolorbox{interviewer}{
+  enhanced,breakable,
+  colback=orange!5,colframe=orange!70!black,
+  arc=2mm,boxrule=0.5pt,
+  left=6pt,right=6pt,top=4pt,bottom=4pt,
+  title={\textbf{面试官提问}},
+  fonttitle=\bfseries\color{white},
+  colbacktitle=orange!70!black,
+}
+\newtcolorbox{candidate}{
+  enhanced,breakable,
+  colback=teal!4,colframe=teal!60!black,
+  arc=2mm,boxrule=0.5pt,
+  left=6pt,right=6pt,top=4pt,bottom=4pt,
+  title={\textbf{我的回答}},
+  fonttitle=\bfseries\color{white},
+  colbacktitle=teal!60!black,
+}
+\newtcolorbox{followup}{
+  enhanced,breakable,
+  colback=purple!4,colframe=purple!60!black,
+  arc=2mm,boxrule=0.5pt,
+  left=6pt,right=6pt,top=4pt,bottom=4pt,
+  title={\textbf{追问与回应}},
+  fonttitle=\bfseries\color{white},
+  colbacktitle=purple!60!black,
+}
+\newtcolorbox{summary}{
+  enhanced,breakable,
+  colback=gray!5,colframe=gray!60,
+  arc=2mm,boxrule=0.5pt,
+  left=6pt,right=6pt,top=4pt,bottom=4pt,
+  title={\textbf{量化效果与小结}},
+  fonttitle=\bfseries\color{white},
+  colbacktitle=gray!60,
+}
+
+% ---------------- 标题信息 ----------------
+\title{\textbf{\Huge ESP32 + IMU + GPS 车载性能仪}\\[6pt]
+\Large 项目面试技术答辩笔记（模拟面试形式）}
+\author{项目作者：Kevin\quad·\quad 工作目录：\texttt{e:/esp32/esp32-imu}}
+\date{编制日期：2026 年 6 月 8 日}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\begin{tcolorbox}[colback=teal!5,colframe=teal!50!black,arc=2mm,title=\textbf{文档说明}]
+本文采用\textbf{模拟面试 Q\&A} 格式，围绕真实工程难点展开。
+每一节由\textit{面试官提问 $\to$ 我的回答（现象、根因、方案、技术决策）$\to$ 追问 $\to$ 量化效果}构成。
+代码段只贴最关键的几行，更多笔墨放在\textbf{为什么这么选、踩过什么坑、怎么验证}。\\[2pt]
+\textbf{硬件}：ESP32 主控（双核 240\,MHz）+ MPU6050 六轴 IMU + GT-U7 GPS（10\,Hz）。\\
+\textbf{软件}：PlatformIO + Arduino 框架，C++。\\
+\textbf{产品形态}：摩托车／汽车车载 ``Dragy 风格'' 性能仪，实时输出速度、G 力、0--60／0--100 加速时间、倾角、圈速，
+通过 ESP32 自建 Wi-Fi 热点把数据推到手机浏览器。
+\end{tcolorbox}
+
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{项目背景一句话介绍}
+% ============================================================
+
+\begin{interviewer}
+请用一句话介绍这个项目，并说说你认为它最大的工程挑战是什么。
+\end{interviewer}
+
+\begin{candidate}
+这是一个用 \textbf{ESP32 + MPU6050 + GT-U7 GPS} 实现的车载性能仪，类似商业产品 ``Dragy''。
+可以实时测量摩托车／汽车的\textbf{速度、G 力、0--100 加速时间、倾角和圈速}，
+并通过 ESP32 自建 Wi-Fi 热点把数据推到手机浏览器作为仪表盘。
+
+\medskip
+\textbf{最大的挑战不是应用层，而是在恶劣传感环境下做信号融合}。具体三个矛盾：
+\begin{itemize}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{IMU 被振动淹没}：传感器装在发动机舱附近，发动机怠速会产生 20\,–\,50\,Hz 的机械振动，
+        加速度计的原始信号几乎是``信号 + 等幅噪声''，G 力跳变到 $\pm 0.15\,g$。
+  \item \textbf{GPS 低速失真}：GT-U7 只有 10\,Hz 更新率，且静止时由于多路径反射，
+        速度输出是 $0.5$\,–\,$2$\,km/h 的伪动态——\textbf{噪声比信号还大}。
+  \item \textbf{算力受限}：ESP32 不是 ARM Cortex-M7，跑不动完整的卡尔曼滤波矩阵运算，
+        必须用更轻量的近似方法。
+\end{itemize}
+
+后面所有的设计决策——三级滤波、动态信心度融合、静止在线校准——本质上都是围绕这三个矛盾做的工程取舍。
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：你为什么不直接买一个 Dragy 用？}\\
+A：第一，Dragy 不开源，没法定制圈速、倾角等扩展功能；第二，做这个项目对我来说是个\textbf{系统级练手}——
+传感器驱动、信号处理、Wi-Fi 协议、Web 前端串起来跑通，比任何单一知识点的学习收益都高。
+\end{followup}
+
+% ============================================================
+\section{系统架构与数据流}
+% ============================================================
+
+\begin{interviewer}
+ESP32 有双核，传感器又有两个，整个数据流是怎么组织的？
+\end{interviewer}
+
+\begin{candidate}
+我把 ESP32 的双核\textbf{按 ``实时性'' 切开}：
+\begin{itemize}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{Core 0}：跑 Wi-Fi 协议栈和 HTTP/WebSocket 推送。Wi-Fi 的延迟是不确定的，
+        最忌讳和高频采样在同一核上抢时间片。
+  \item \textbf{Core 1}：跑\textbf{严格周期任务}——IMU 200\,Hz 采样、GPS 串口解析、融合算法、
+        加速测试状态机。这一核的循环节拍要尽量稳定，否则滤波器的时间常数都会失真。
+\end{itemize}
+
+\medskip
+\textbf{数据链路（自下而上）}：
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{硬件层}：MPU6050 通过 I2C 接入；GT-U7 通过 UART 输出 NMEA 句。
+  \item \textbf{采样层}：IMU 200\,Hz 中断采样写环形缓冲；GPS 10\,Hz 由 TinyGPS++ 解析。
+  \item \textbf{滤波层}：IMU 走 ``DLPF $\to$ 滑动平均 $\to$ 一阶 IIR'' 三级；GPS 走 ``滑动平均 $\to$ 自适应 IIR $\to$ 死区''。
+  \item \textbf{融合层}：基于 GPS 实时稳定性算\textbf{动态信心度} $\in [0,1]$，融合 IMU 加速度和 GPS 速度差分。
+  \item \textbf{业务层}：加速测试状态机（待触发／计时中／完成）、圈速判定、距离统计。
+  \item \textbf{推送层}：数据序列化为 JSON，通过 WebSocket 推到手机浏览器，前端用 Chart.js 绘图。
+\end{enumerate}
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：为什么 IMU 选 200\,Hz？}\\
+A：摩托车的快速动作（急刹、急转）特征频率在 5\,–\,20\,Hz，按奈奎斯特至少要 40\,Hz 采样；
+但为了让三级滤波后还留有足够的有效带宽（截止 $\sim$ 3\,Hz）、并且滑动平均的窗口足够细分，
+200\,Hz 是一个``有余量但又不浪费 I2C 带宽''的合适值。
+
+\medskip
+\textbf{Q：GPS 10\,Hz 和 IMU 200\,Hz 频率差 20 倍，怎么对齐时间戳？}\\
+A：我没做严格的时间对齐，而是\textbf{在 GPS 帧到来的瞬间重新计算融合权重}，
+两帧 GPS 之间的 IMU 数据按上一帧权重独立滤波。
+这种简化在低动态场景下误差可接受，但严格场景需要做预测--更新框架（卡尔曼那一套），属于改进方向。
+\end{followup}
+
+% ============================================================
+\section{问题一：IMU 被发动机振动淹没}
+% ============================================================
+
+\begin{interviewer}
+你说传感器装在发动机舱附近，振动很大。能具体描述现象吗？你是怎么定位根因的？
+\end{interviewer}
+
+\begin{candidate}
+\textbf{现象}：发动机怠速时，把原始加速度通过串口画到 Serial Plotter 上，
+能看到一条贴着真值的高频毛刺带，幅值 $\pm 0.15\,g$，频率目测 20\,–\,50\,Hz。
+UI 上的表现就是：
+\begin{itemize}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item 静止时 G 力数值在 $\pm 0.15\,g$ 范围乱跳；
+  \item 姿态角抖动 $\pm 5^\circ$ 量级，仪表看起来像车在剧烈晃动；
+  \item 0--100 加速测试的\textbf{起跑判定被误触发}——系统以为车已经在动了。
+\end{itemize}
+
+\medskip
+\textbf{定位过程}：我一开始怀疑是 I2C 通讯出错或者寄存器配置错了，
+但拿掉车一放回桌面就完全正常，说明芯片本身没问题——\textbf{是环境振动}。
+
+接下来翻 MPU6050 数据手册，发现内置的数字低通滤波器（DLPF）\textbf{默认带宽是 260\,Hz}，
+比我要滤的 20\,–\,50\,Hz 高出一个数量级，\textbf{等于完全没滤波}。这就是根因。
+\end{candidate}
+
+\begin{interviewer}
+那你是怎么处理的？为什么不直接把截止频率拉到 5\,Hz 一刀切？
+\end{interviewer}
+
+\begin{candidate}
+\textbf{一刀切的代价是动态响应迟钝}。摩托车急刹的有效频率分量可以到 5\,Hz 以上，
+如果直接用 5\,Hz 一阶低通，会引入大约 200\,ms 的群延迟，
+意味着 0--100 加速时间会被系统性高估，这是不能接受的。
+
+\medskip
+所以我设计了\textbf{三级级联滤波}，每一级只做温和的衰减，叠加起来效果够，但每一级的相位延迟都小：
+
+\begin{center}
+\begin{tabularx}{\linewidth}{p{1.5cm}p{3cm}p{2cm}X}
+\toprule
+级别 & 实现 & 截止频率 & 设计意图 \\
+\midrule
+第 1 级 & MPU6050 硬件 DLPF & 94\,Hz & 先把高频抖动衰减到能用 ADC 表示的范围 \\
+第 2 级 & 10 点滑动平均（FIR）& 约 10\,Hz & 抑制中频振动，相位线性 \\
+第 3 级 & 一阶 IIR（$\alpha=0.1$）& 约 3.5\,Hz & 最终平滑，$O(1)$ 内存 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\medskip
+\textbf{硬件 DLPF 选 94\,Hz 而不是 21\,Hz 的理由}：陀螺仪要追踪摩托车快速转向（可达 $90^\circ$/s），
+如果 DLPF 截止太低，转向数据会被``磨掉''。94\,Hz 保留了动态响应，
+剩下的 20\,–\,50\,Hz 振动交给后两级软件滤波处理。
+
+\medskip
+\textbf{第三级 IIR 的 $\alpha = 0.1$ 怎么定的}：发动机怠速主振在 20\,–\,50\,Hz，
+希望最终截止落在 5\,Hz 以下。按 $f_c \approx \alpha f_s / (2\pi)$，
+代入 $f_s = 200$、$\alpha = 0.1$ 得 $f_c \approx 3.2$\,Hz，正好合适。
+最后用 Serial Plotter 看波形微调过——0.1 的时候静止噪声落到 $\pm 0.01\,g$，动态响应也跟得上。
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：第三级为什么用 IIR 而不是更精确的 FIR？}\\
+A：MCU 上 IIR 只要存上一帧输出（$O(1)$ 内存），FIR 要存整个窗口。
+代价是 IIR 有相位非线性，但\textbf{本项目不做频谱分析}，对相位线性度不敏感——这是个工程取舍。
+
+\medskip
+\textbf{Q：为什么是三级而不是两级或四级？}\\
+A：两级（DLPF + IIR）我先试过，但中频段（10\,–\,30\,Hz）衰减不够，
+G 力仍有 $\pm 0.05\,g$ 噪声；加上 FIR 中间级后，三段衰减叠加干掉了这个中频带。
+再加第四级收益就微乎其微了——边际效应。这种调参是看波形决定的，不是预先算出来的。
+
+\medskip
+\textbf{Q：你怎么验证滤波器真的有效？}\\
+A：分三步：
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=1pt]
+  \item \textbf{波形对比}：串口同时打印原始值和滤波值，用 Arduino Serial Plotter 看；
+  \item \textbf{静态噪声}：装车上怠速 30 秒，记录 G 力 RMS——目标 $< 0.02\,g$；
+  \item \textbf{动态可重复性}：同一条路 0--100 测 5 次，加速时间标准差从 $\sim$0.4\,s 降到 $\sim$0.1\,s，说明信号是稳定可重复的。
+\end{enumerate}
+\end{followup}
+
+\begin{summary}
+\begin{center}\begin{tabular}{lll}
+\toprule
+指标 & 滤波前 & 滤波后 \\\midrule
+静止 G 力噪声 & $\pm 0.15\,g$ & $\pm 0.01\,g$（死区归零）\\
+怠速姿态角抖动 & $\pm 5^\circ$ & $\pm 0.5^\circ$ \\
+信号延迟 & 0\,ms & $\sim 25$\,–\,50\,ms（可接受） \\
+0--100 加速时间标准差 & $\sim 0.4$\,s & $\sim 0.1$\,s \\
+\bottomrule
+\end{tabular}\end{center}
+\end{summary}
+
+% ============================================================
+\section{问题二：姿态角只用加速度计的局限}
+% ============================================================
+
+\begin{interviewer}
+我看你的代码里 Roll/Pitch 是用 \texttt{atan2} 直接从加速度算的，Yaw 干脆写死成 0。
+这样会有什么问题？为什么没改？
+\end{interviewer}
+
+\begin{candidate}
+这是我项目里\textbf{已知且主动暴露的缺口}，面试时我会先说出来。当前的姿态解算只用加速度计：
+\begin{lstlisting}
+Roll  = atan2(Acc_Y, Acc_Z);
+Pitch = atan2(-Acc_X, sqrt(Acc_Y*Acc_Y + Acc_Z*Acc_Z));
+Yaw   = 0;     // 没有磁力计, 硬编码
+\end{lstlisting}
+
+\textbf{三个具体问题}：
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{加速度计无法区分``重力''和``线加速度''}。摩托车加速时车身水平不变，
+        但 X 轴会感受到向后的惯性力，被 \texttt{atan2} 解释成俯仰，
+        于是 Pitch 显示``车头抬起 5\,–\,10$^\circ$''，但实际车身根本没动。
+  \item \textbf{陀螺仪信息完全没用上}。陀螺仪短时间精度极高（角速度积分一两秒内非常准），
+        如果配合加速度计的长期参考，姿态角能稳得多。我现在等于扔掉了一半的信息。
+  \item \textbf{Yaw 固定为 0}。摩托车转弯时航向变化完全感知不到，
+        圈速判定里没法用车辆朝向作为辅助条件。
+\end{enumerate}
+\end{candidate}
+
+\begin{interviewer}
+正确做法是什么？为什么没做？
+\end{interviewer}
+
+\begin{candidate}
+正确解法是\textbf{互补滤波}（Complementary Filter）。核心思想一句话：
+\textbf{陀螺仪高频可信、加速度计低频可信，按频段融合}。
+
+每一帧的姿态角 = $\alpha \times$（上一帧角度 + 陀螺仪积分）+ $(1-\alpha) \times$ 加速度计算出的角度。
+取 $\alpha = 0.98$ 是常见选择，相当于``短时间内 98\% 信任陀螺仪，2\% 用加速度计慢慢拉回真值''。
+计算量比卡尔曼小一个数量级，特别适合 MCU。
+
+\medskip
+\textbf{为什么本项目没做}：两个原因。
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{优先级问题}。这个项目的核心 KPI 是 G 力和加速时间，
+        姿态角是 UI 的``装饰性''指标。我把开发时间先投入到了 GPS-IMU 融合上。
+  \item \textbf{Yaw 没磁力计搞不定}。即使做了互补滤波，Yaw 仍然会漂移——
+        要么加 QMC5883L 磁力计，要么从 GPS 航向反推。这是一个需要新硬件的改动，留到下一版。
+\end{enumerate}
+
+\medskip
+\textbf{诚实地说}，Roll/Pitch 的互补滤波是\textbf{下一个迭代必做项}——投入很小、收益很大，
+我应该早就做的。
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：互补滤波 $\alpha = 0.98$ 怎么直观理解？}\\
+A：可以这样想——$\alpha$ 越接近 1，越像``信陀螺仪''；越接近 0，越像``信加速度计''。
+$\alpha = 0.98$ 对应一个时间常数 $\tau \approx 0.25$\,秒，
+意思是：\textbf{加速度计要花约 0.25 秒才能把陀螺仪的累积误差拉回正确值}。
+这个时间够长，能平滑掉短暂振动；又够短，不会让陀螺仪的漂移失控。
+\end{followup}
+
+% ============================================================
+\section{问题三：GPS 静止零漂}
+% ============================================================
+
+\begin{interviewer}
+GPS 输出的速度在静止时是稳定的吗？
+\end{interviewer}
+
+\begin{candidate}
+\textbf{不稳定}。这也是 GPS 模块的一个反直觉问题——很多人以为``GPS 不动就是 0''，其实不是。
+
+GT-U7 在静止时输出的速度往往是 $0.5$\,–\,$2$\,km/h 的伪动态。
+原因有两个：\textbf{多路径反射}（信号被建筑物反弹一下再到达，时延变化）和\textbf{卫星几何误差}
+（卫星布局对速度解算的精度有影响）。
+
+\medskip
+\textbf{后果}：
+\begin{itemize}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item 静止时 UI 显示``车辆正在缓慢移动''，体验很怪；
+  \item 更糟的是 \textbf{0--100 加速测试的起跑判定}——系统以为车一直在动，根本触发不了``静止 $\to$ 起步''的状态切换，
+        或者随机时刻误触发，导致测试结果毫无意义。
+\end{itemize}
+\end{candidate}
+
+\begin{interviewer}
+你怎么解决的？为什么不简单地做一个阈值死区就完事？
+\end{interviewer}
+
+\begin{candidate}
+\textbf{简单死区的问题是``一刀切阈值在低速段不准''}。如果死区设 1\,km/h，
+那真实的 0.8\,km/h 行驶（比如刚起步的瞬间）会被吃掉；
+如果设 0.5\,km/h，又压不住零漂。\textbf{固定阈值在这两个误差之间没有合适解}。
+
+\medskip
+我的方案是\textbf{按情境动态变化的三层抑制}：
+
+\medskip
+\textbf{第 1 层：稳定性判定（2 秒滑动窗）}\\
+不是看瞬时值，而是看\textbf{20 个采样点的均值和标准差}。
+当标准差 $<$ 0.2\,km/h 且均值 $<$ 动态阈值时，认为``真的静止''。
+这层的核心思想是：\textbf{零漂虽然非零，但它是``抖动''的；真实低速是``稳定的''}。
+用统计特征区分两者，比看绝对值靠谱得多。
+
+\medskip
+\textbf{第 2 层：自适应 IIR 滤波（按速度段切 $\alpha$）}
+\begin{center}\begin{tabular}{ll}
+\toprule
+当前速度段 & IIR 系数 $\alpha$ \\\midrule
+$< 0.5$\,km/h     & 0.92（强滤波，慢响应，专门抑零漂）\\
+1.5\,–\,4\,km/h   & 0.60（中等，过渡）\\
+$> 4$\,km/h       & 0.35（弱滤波，快响应，不延迟测试计时）\\
+\bottomrule
+\end{tabular}\end{center}
+含义是：\textbf{越是低速越压得狠，越是高速越放手让它跟}。
+这就解决了固定阈值的两难。
+
+\medskip
+\textbf{第 3 层：最终死区}\\
+信号好（卫星 $\ge 8$、HDOP $<$ 1.0）时阈值 0.8\,km/h，信号差时 1.2\,km/h。
+\textbf{死区的阈值本身也跟着信号质量动}。
+
+\medskip
+\textbf{三层叠加的结果}：静止判定需要持续 1.5 秒确认，
+真实起步时（速度从 0 突变）大概 100\,ms 内就能挣脱滤波抑制——非对称响应。
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：为什么不直接用 IMU 判静止？IMU 加速度归零更直接。}\\
+A：IMU 有自己的偏置问题（见问题五），\textbf{IMU 的``静止''比 GPS 的``静止''更不可靠}。
+反过来，\textbf{用 GPS 判静止反过来给 IMU 做自动校准}，这正是我下一节要讲的思路。
+
+\medskip
+\textbf{Q：1.5 秒判定时间会不会太久？错过了起跑怎么办？}\\
+A：起跑判定的逻辑是\textbf{倒过来的}——不是``等 1.5 秒确认静止''然后才开始测，
+而是``车已经被判定静止''之后\textbf{任何时刻的速度突变都会立即触发起跑计时}。
+所以 1.5 秒只影响``进入待触发状态''的灵敏度，不影响测试本身的精度。
+\end{followup}
+
+\begin{summary}
+\begin{center}\begin{tabular}{ll}
+\toprule
+情境 & 结果 \\\midrule
+信号好的静止判定阈值 & 0.8\,km/h \\
+信号差的静止判定阈值 & 1.2\,km/h \\
+``确认静止''需要持续时间 & 1.5\,s \\
+``起步''响应延迟 & $\sim 100$\,ms \\
+\bottomrule
+\end{tabular}\end{center}
+\end{summary}
+
+% ============================================================
+\section{问题四：GPS--IMU 融合与动态信心度}
+% ============================================================
+
+\begin{interviewer}
+GPS 和 IMU 两个传感器各有问题，你怎么把它们融合到一起？
+\end{interviewer}
+
+\begin{candidate}
+两个传感器的缺陷是\textbf{互补的}——这正是为什么要融合：
+\begin{itemize}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{IMU 加速度}：高频、低延迟，但有零偏、易受振动干扰；
+  \item \textbf{GPS 加速度}（速度差分得到）：长期准确、不漂移，但 10\,Hz 更新太慢、低速时不可靠。
+\end{itemize}
+
+\medskip
+\textbf{我没有用固定权重}，因为情境是变化的——市区低速时 GPS 不可信，应该信 IMU；
+高速巡航时 GPS 极准，应该让 GPS 校正 IMU 的累积偏差。
+
+\medskip
+所以我做了一个\textbf{动态信心度机制}：实时评估 GPS 当前有多可信，
+然后\textbf{用这个可信度作为权重去融合 IMU}。这个思路本质上是\textbf{卡尔曼滤波的简化版}——
+卡尔曼是用噪声协方差自动算权重，我是手动设计一个可解释的权重函数。
+\end{candidate}
+
+\begin{interviewer}
+具体怎么算这个信心度？
+\end{interviewer}
+
+\begin{candidate}
+分四步：
+
+\medskip
+\textbf{Step 1：用 GPS 速度历史的方差衡量稳定性}\\
+取最近 16 个 GPS 速度样本，算方差。
+方差大，说明 GPS 正在抖动（多路径或卫星切换），稳定性低；方差小说明 GPS 输出连续平滑，稳定性高。
+归一化到 $[0,1]$ 区间。
+
+\medskip
+\textbf{Step 2：用卫星数和 HDOP 衡量信号质量}\\
+卫星数 $\ge 8$ 且 HDOP $<$ 1.5 时，信号质量 = 1.0；否则 = 0.6。
+HDOP 是水平精度因子，由卫星几何分布决定，是 GPS 自带的最直接的质量指标。
+
+\medskip
+\textbf{Step 3：综合信心度 = 稳定性 $\times$ 信号质量}\\
+两者相乘，得到一个 $[0,1]$ 区间的实时``GPS 可信度''。
+任一项垮掉，综合分都低——这是\textbf{保守的与逻辑}。
+
+\medskip
+\textbf{Step 4：按信心度融合}\\
+最终融合的加速度 = 信心度 $\times$ IMU 加速度 + (1 - 信心度) $\times$ GPS 加速度差分。
+含义：\textbf{GPS 越可信，我越敢用 GPS 的差分校正 IMU 的偏置和漂移；GPS 不可信时，完全信 IMU 的高频响应}。
+
+\medskip
+\textbf{滤波器的 $\alpha$ 也跟着信心度变}：动态状态下 $\alpha = 0.4 + 0.4 \times$ 信心度。
+信心度高时滤波弱一点（让 GPS 的校正生效快），信心度低时滤波强一点（让 IMU 自己稳住）。
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：为什么不直接上卡尔曼滤波？}\\
+A：三个原因。
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{算力}：卡尔曼的协方差矩阵更新涉及矩阵乘法，ESP32 上能跑但会挤占其他任务的时间预算。
+  \item \textbf{建模成本}：卡尔曼需要先建立状态空间模型、估出噪声协方差 $Q$ 和 $R$，
+        这两个矩阵的取值非常影响结果，调起来比 $\alpha$ 困难得多。
+  \item \textbf{可解释性}：我现在的方案是``信心度 = 稳定性 $\times$ 信号质量''，
+        每个因子物理意义清晰；卡尔曼的内部状态对调试者来说是黑盒。
+\end{enumerate}
+对一个个人项目来说，\textbf{先用可解释的简化方案跑通，再考虑要不要上更重的工具}，这是我的优先级。
+
+\medskip
+\textbf{Q：那什么时候应该上卡尔曼？}\\
+A：当传感器数量 $>$ 2、状态量是耦合的（比如位置／速度／加速度同时估计）、或者要处理非高斯噪声时。
+本项目只融合一维纵向速度，状态量极少，可解释的简化方案够用。
+但如果以后要加磁力计做姿态、要做横向速度估计（防滑），就值得上 EKF 了。
+\end{followup}
+
+% ============================================================
+\section{问题五：IMU 加速度偏置（Zero-g Offset）校准}
+% ============================================================
+
+\begin{interviewer}
+MPU6050 本身就有出厂零偏，你怎么处理？
+\end{interviewer}
+
+\begin{candidate}
+MPU6050 的出厂 Zero-g Offset 可达 $\pm 50$\,–\,$150$\,mg，
+换算成加速度大约是 $\pm 0.5$\,–\,$1.5$\,m/s$^2$。
+
+\medskip
+\textbf{这个偏置看着小，但会被积分放大}——如果用加速度算速度，
+$1$\,m/s$^2$ 的偏置积分 10 秒，就是 $10$\,m/s 的速度误差，
+完全失真。0--100 测试需要的精度是 $\pm 0.1$\,s 量级，根本经不起这种漂移。
+
+\medskip
+我用了\textbf{两层处理}：
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{装机时手动测一次出厂偏置}，硬编码进代码作为基线；
+  \item \textbf{运行时自动二次校准}，处理安装偏置和长期漂移。
+\end{enumerate}
+\end{candidate}
+
+\begin{interviewer}
+``运行时自动校准''——传感器在运动中怎么校准？
+\end{interviewer}
+
+\begin{candidate}
+关键技巧是\textbf{借用 GPS 给 IMU 当裁判}。
+
+\medskip
+\textbf{逻辑很简单}：当 GPS 判定车真的静止时（用上一节讲的三层稳定性判定），
+此时 IMU 测到的纵向加速度\textbf{理论值就是 0}——
+任何非零读数都是偏置造成的。我把这些读数做个均值，就是偏置估计。
+
+\medskip
+\textbf{算法细节}：
+\begin{itemize}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item 静止状态下连续采集 200 个样本（约 1 秒）；
+  \item 用\textbf{递推均值}（Recursive Mean）增量更新偏置估计，不需要存数组——$O(1)$ 内存；
+  \item 200 个样本后标记``已校准''，后续每帧的加速度自动减去偏置。
+\end{itemize}
+
+\medskip
+\textbf{递推均值的好处}：
+普通做法是开个数组存 200 个样本然后求均值，但 200 个 double 就是 1.6\,KB——
+对于一个传感器还能接受，多几个就吃紧。递推均值用一个浮点数就够，公式：
+\[
+\bar{x}_n = \frac{\bar{x}_{n-1}\cdot(n-1) + x_n}{n}.
+\]
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：温度漂移呢？MPU6050 对温度敏感。}\\
+A：\textbf{目前没处理}，这是改进方向之一。
+MPU6050 内置温度传感器，正确的做法是采集``温度--偏置''曲线，做一个查表或者拟合补偿。
+长时间骑行（发动机舱温度从 20\,°C 升到 60\,°C）会导致零偏额外漂移 $\pm 30\,$mg 左右。
+对短时间加速测试影响不大，但对长时间距离积分影响明显。
+
+\medskip
+\textbf{Q：三种偏置来源你都处理了吗？}
+
+\begin{center}\begin{tabular}{lll}
+\toprule
+类型 & 原因 & 本项目处理 \\\midrule
+出厂零偏 & 制造工艺误差 & 手动测量后硬编码 \\
+安装偏置 & 传感器轴未与车辆轴对齐 & 静止时在线递推校准 \\
+温度漂移 & 温度变化改变灵敏度 & \textbf{未处理}（改进方向） \\
+\bottomrule
+\end{tabular}\end{center}
+\end{followup}
+
+% ============================================================
+\section{问题六：GPS 位置跳变过滤}
+% ============================================================
+
+\begin{interviewer}
+GPS 信号被遮挡再恢复时（比如出隧道），位置常常会跳一下，你是怎么处理的？
+\end{interviewer}
+
+\begin{candidate}
+\textbf{现象}：GPS 重新搜星定位时，坐标可能瞬间跳变\textbf{数百米}。
+这会让两个业务功能崩溃：
+\begin{itemize}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{距离统计}：每帧距离差累加，一次跳变可能凭空多出 500\,m；
+  \item \textbf{轨迹绘制}：手机端地图上会出现一条横跨地图的``瞬移直线''，体验很差。
+\end{itemize}
+
+\medskip
+\textbf{我的处理：合理性检验}。核心思想是\textbf{用物理规律拒绝不可能的数据}——
+两帧之间的真实位移上限是由\textbf{车辆物理速度}决定的。
+
+\medskip
+具体逻辑：
+\begin{itemize}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item 用 \textbf{Haversine 公式}算上一帧坐标到这一帧坐标的距离；
+  \item 设上限 1000\,m（GPS 帧间隔 100\,ms，对应速度上限 $10\,000\,$m/s，远超 F1 赛车的 83\,m/s）；
+  \item 超过 1000\,m 直接\textbf{拒绝这一帧}，沿用上一帧坐标，等下一帧来再判断。
+\end{itemize}
+
+\medskip
+\textbf{为什么阈值取得这么宽松（1000\,m）}：宁可放过偶尔的小跳变，也不能误杀真实的高速行驶。
+小跳变（几十米）有其他机制兜底（速度平滑），但误杀一帧高速数据会直接破坏圈速判定。
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：Haversine 公式精度够用吗？为什么不用 Vincenty？}\\
+A：Haversine 把地球当成正球，对地表短距离（$<$ 几百公里），误差 $<$ 0.5\%。
+本项目最长用途是圈速（赛道几百米尺度），1\,km 的跳变阈值更宽松，0.5\% 误差完全不影响判定。
+Vincenty 把地球当椭球，精度高，但要迭代求解，在 ESP32 上算力不划算。
+
+\medskip
+\textbf{Q：为什么不直接用 GPS 自己的速度，而是从位置差分？}\\
+A：\textbf{我用的恰好就是 GPS 自己的速度}。
+GT-U7 的 \texttt{\$GPRMC} NMEA 句中速度字段是\textbf{多普勒测速}——
+GPS 接收机对卫星信号的频移做积分得到，物理上比位置差分精度高约 10 倍
+（不受多路径位置误差影响）。
+TinyGPS++ 的 \texttt{gps.speed.kmph()} 拿到的就是这个值，本身就是正确做法。
+
+\medskip
+\textbf{Q：那位置差分用在哪？}\\
+A：位置差分仅用于\textbf{这一节讲的``跳变检测''}和\textbf{距离累加（里程）}，
+不参与速度估计。这样就避开了位置差分本身精度不够的问题。
+\end{followup}
+
+% ============================================================
+\section{我目前的已知缺口与改进方向}
+% ============================================================
+
+\begin{interviewer}
+你觉得这个项目还有哪些不够好的地方？
+\end{interviewer}
+
+\begin{candidate}
+面试时\textbf{主动说出缺口}，比被追问出来更能体现技术成熟度。
+我整理了 6 个，按``收益／成本''排序：
+
+\begin{center}
+\begin{tabularx}{\linewidth}{p{3.8cm}p{4.4cm}X}
+\toprule
+缺口 & 影响 & 推荐改进方向 \\
+\midrule
+姿态角无互补滤波 & 加速/制动时 Pitch 误差 5\,–\,10$^\circ$ & 互补滤波 $\alpha\approx 0.98$，工作量极小 \\
+手动硬编码偏置 & 换硬件就要重新测 & 全部替换为自动静止校准，已有基础设施 \\
+IMU 温漂未补偿 & 长时间测量后偏移 & 用 MPU6050 内置温度传感器做查表补偿 \\
+Yaw 固定为 0    & 无法感知转向，圈速判定信息少 & 加 QMC5883L 磁力计，或从 GPS 航向反推 \\
+GPS-IMU 融合未用 EKF & 信心度模型偏粗 & 实现 1D EKF（只融合纵向速度，状态量少） \\
+摩托大倾角未补重力投影 & 倾角 $> 30^\circ$ 时纵向 G 力含重力分量误差 & $a_{\text{真}} = a_{\text{测}} - g\sin(\text{Roll})$ \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\medskip
+排在前两位的都是``一天内能做完、收益巨大''的改动——我应该早就做的。
+\end{candidate}
+
+% ============================================================
+\section{面试常见追问 Q\&A 汇总}
+% ============================================================
+
+\begin{followup}
+\textbf{Q：你怎么验证一个滤波器的参数是不是合适？}\\
+A：分三层——\textbf{波形（看）、统计（量）、业务指标（拐弯验证）}。
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=1pt]
+  \item 串口同时打印原始值和滤波值，用 Serial Plotter 直观看波形；
+  \item 静态噪声 RMS、动态延迟（阶跃响应测）——量化指标；
+  \item 跑一次真实业务（0--100 加速测试），看结果可重复性。
+\end{enumerate}
+三层都过了才算稳。
+
+\medskip
+\textbf{Q：ESP32 跑这么多任务，会不会丢数据？}\\
+A：双核分工已经把 Wi-Fi 和实时采样隔开了。我也在采样循环里加了``节拍监控''——
+统计每 1000 帧的实际耗时，目标是 5000\,ms（200\,Hz 周期），偏差 $<$ 1\% 我才放心。
+有一次发现 Wi-Fi 重连时节拍偏移了 20\,ms，就是用这个监控发现的。
+
+\medskip
+\textbf{Q：项目里你最自豪的设计是什么？}\\
+A：\textbf{基于 GPS 稳定性的动态信心度融合}。
+传统教程都讲固定权重的互补滤波，但实际场景中``信心度''是变化的——
+GPS 在隧道里和在空旷高速上的可信度完全不一样。
+我用一个简单的``稳定性 $\times$ 信号质量''函数把这件事建模出来，
+本质上是\textbf{把卡尔曼滤波的核心思想用最低成本实现}，在 ESP32 上跑得动，并且参数都可解释。
+
+\medskip
+\textbf{Q：如果让你重做这个项目，最先改什么？}\\
+A：\textbf{两件事}：
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=1pt]
+  \item 姿态解算换成互补滤波；
+  \item 把那个硬编码的偏置常量全部删掉，换成纯自动校准。
+\end{enumerate}
+都是低风险、高收益的改动。如果还有时间，再加磁力计做 Yaw、做温度补偿。
+
+\medskip
+\textbf{Q：这个项目教会了你什么？}\\
+A：三点：
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=1pt]
+  \item \textbf{真实传感器和教科书不一样}——零偏、漂移、噪声、信号遮挡，每一项都要单独处理；
+  \item \textbf{算力受限时，可解释 $>$ 最优}——卡尔曼最优，但调不动；可解释的简化方案能跑、能调、能优化；
+  \item \textbf{诚实标注缺口}比写完美代码更专业——主动列出``我没做什么''才是工程师的成熟态度。
+\end{enumerate}
+\end{followup}
+
+\vfill
+\hrule
+\smallskip
+\noindent\textit{\small 最后更新：2026-06-08 \quad·\quad 项目路径：\texttt{e:/esp32/esp32-imu}}
+
+\end{document}
