@@ -156,7 +156,7 @@ ESP32 有双核，传感器又有两个，整个数据流是怎么组织的？
 \begin{candidate}
 我把 ESP32 的双核\textbf{按 ``实时性'' 切开}：
 \begin{itemize}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
-  \item \textbf{Core 0}：跑 Wi-Fi 协议栈和 HTTP/WebSocket 推送。Wi-Fi 的延迟是不确定的，
+  \item \textbf{Core 0}：跑 Wi-Fi 协议栈和 HTTP JSON 服务。Wi-Fi 的延迟是不确定的，
         最忌讳和高频采样在同一核上抢时间片。
   \item \textbf{Core 1}：跑\textbf{严格周期任务}——IMU 200\,Hz 采样、GPS 串口解析、融合算法、
         加速测试状态机。这一核的循环节拍要尽量稳定，否则滤波器的时间常数都会失真。
@@ -170,7 +170,7 @@ ESP32 有双核，传感器又有两个，整个数据流是怎么组织的？
   \item \textbf{滤波层}：IMU 走 ``DLPF $\to$ 滑动平均 $\to$ 一阶 IIR'' 三级；GPS 走 ``滑动平均 $\to$ 自适应 IIR $\to$ 死区''。
   \item \textbf{融合层}：基于 GPS 实时稳定性算\textbf{动态信心度} $\in [0,1]$，融合 IMU 加速度和 GPS 速度差分。
   \item \textbf{业务层}：加速测试状态机（待触发／计时中／完成）、圈速判定、距离统计。
-  \item \textbf{推送层}：数据序列化为 JSON，通过 WebSocket 推到手机浏览器，前端用 Chart.js 绘图。
+  \item \textbf{展示层}：数据序列化为 JSON，通过 \texttt{/data}、\texttt{/moto} 等 HTTP 接口给手机浏览器轮询，前端用 Canvas 绘图。
 \end{enumerate}
 \end{candidate}
 
@@ -638,6 +638,88 @@ TinyGPS++ 的 \texttt{gps.speed.kmph()} 拿到的就是这个值，本身就是�
 A：位置差分仅用于\textbf{这一节讲的``跳变检测''}和\textbf{距离累加（里程）}，
 不参与速度估计。这样就避开了位置差分本身精度不够的问题。
 \end{followup}
+
+% ============================================================
+\section{问题七：网络热点与 Web 仪表盘实现}
+% ============================================================
+
+\begin{interviewer}
+这个项目说手机可以直接连 ESP32 看仪表盘。热点和网页服务具体是怎么实现的？
+\end{interviewer}
+
+\begin{candidate}
+这部分我没有依赖外部路由器，而是让 ESP32 自己工作在 \textbf{SoftAP 模式}，
+同时在本机 80 端口跑一个轻量 HTTP Server。手机连接 ESP32 的热点后，
+手机和 ESP32 就在同一个小局域网里，浏览器访问 \texttt{192.168.4.1}，
+请求实际到达的是 ESP32 上的 \texttt{WebServer}。
+
+\medskip
+核心启动代码可以简化成这样：
+\begin{lstlisting}
+const char* ap_ssid = "ESP32-IMU";
+const char* ap_password = "12345678";
+WebServer server(80);
+
+SPIFFS.begin(true);
+WiFi.softAP(ap_ssid, ap_password);
+
+server.on("/", handleRoot);
+server.on("/data", handleData);
+server.on("/moto", handleMotoData);
+server.on("/audio", handleAudioData);
+server.begin();
+\end{lstlisting}
+
+\medskip
+整个链路分三层：
+\begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
+  \item \textbf{网络层}：\texttt{WiFi.softAP()} 创建热点，SSID 是 \texttt{ESP32-IMU}，密码是 \texttt{12345678}，默认网关 IP 是 \texttt{192.168.4.1}；
+  \item \textbf{静态资源层}：前端页面放在 PlatformIO 的 \texttt{data/index.html}，上传到 SPIFFS。访问根路径 \texttt{/} 时，\texttt{handleRoot()} 从 SPIFFS 读出页面并流式返回；
+  \item \textbf{实时数据层}：\texttt{/data} 输出速度、GPS、G 力和性能测试 JSON；\texttt{/moto} 输出倾角和摩托车 G 力；\texttt{/audio} 输出录音状态。
+\end{enumerate}
+
+\medskip
+主循环里必须频繁调用：
+\begin{lstlisting}
+void loop() {
+  server.handleClient();
+  // IMU/GPS/OLED 等任务用 millis() 非阻塞调度
+}
+\end{lstlisting}
+\texttt{server.handleClient()} 负责检查有没有浏览器请求，并把请求分发到对应 handler。
+所以代码里 IMU 采样、GPS 解析、OLED 刷新都不能长时间阻塞；如果用了大段 \texttt{delay()}，
+网页就会明显卡顿，甚至浏览器请求超时。
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：为什么不用 STA 模式连家里的路由器？}\\
+A：车载/摩托场景经常没有可用 Wi-Fi，而且让用户配置路由器 SSID 和密码很麻烦。
+SoftAP 的好处是\textbf{设备自带网络环境}：上电就能搜到热点，手机直连即可使用。
+代价是默认没有互联网，但本项目只是本地仪表盘，不需要外网。
+
+\medskip
+\textbf{Q：为什么用 HTTP 轮询，而不是 WebSocket？}\\
+A：当前网页主要显示 10--20\,Hz 的速度、G 力和倾角，HTTP JSON 轮询已经够用；
+Arduino 自带 \texttt{WebServer} 简单、稳定、内存占用低。WebSocket 更适合多客户端低延迟推送，
+但需要额外库和连接状态管理。对这个原型来说，HTTP 轮询的工程复杂度更低。
+
+\medskip
+\textbf{Q：为什么网页文件要放 SPIFFS？}\\
+A：这样前端页面和固件逻辑解耦。C++ 只负责 HTTP 路由和 JSON 数据，HTML/CSS/JS 放在 Flash 文件系统里，
+后续改 UI 不需要把大段字符串硬编码进 C++，也更接近真实嵌入式 Web 配置页的做法。
+
+\medskip
+\textbf{Q：这块最大的风险是什么？}\\
+A：风险主要是\textbf{实时采样和网络服务抢主循环时间}。我的处理是所有周期任务用 \texttt{millis()} 调度，
+每轮都先让 \texttt{server.handleClient()} 有机会运行；如果后续客户端更多，应该升级为 AsyncWebServer，
+或者把 Web 任务和传感器采样任务进一步隔离。
+\end{followup}
+
+\begin{summary}
+网络热点这块可以概括成一句话：\textbf{ESP32 SoftAP + SPIFFS 静态页面 + HTTP JSON API}。
+ESP32 自己开热点，自己托管网页；浏览器定时请求 \texttt{/data} 和 \texttt{/moto}，
+固件在主循环中非阻塞处理请求，把实时传感器状态变成手机仪表盘。
+\end{summary}
 
 % ============================================================
 \section{我目前的已知缺口与改进方向}

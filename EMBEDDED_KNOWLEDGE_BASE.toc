@@ -1,0 +1,85 @@
+\contentsline {section}{\numberline {1}Embedded Knowledge Base}{4}{section.1}%
+\contentsline {subsection}{\numberline {1.1}目录}{4}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}阅读前先知道的事实}{4}{subsection.1.2}%
+\contentsline {section}{\numberline {2}第一部分：项目全景图}{5}{section.2}%
+\contentsline {section}{\numberline {3}ESP32 Draggy Racing Logger}{5}{section.3}%
+\contentsline {subsection}{\numberline {3.1}项目背景}{5}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}项目目标}{5}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}技术栈}{6}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}项目一句话总结}{6}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}项目目录结构分析}{6}{subsection.3.5}%
+\contentsline {section}{\numberline {4}第二部分：系统架构设计}{7}{section.4}%
+\contentsline {section}{\numberline {5}系统架构}{7}{section.5}%
+\contentsline {subsection}{\numberline {5.1}总体架构}{7}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}为什么这样拆分}{7}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}数据链路}{8}{subsection.5.3}%
+\contentsline {subsubsection}{\numberline {5.3.1}运动数据链}{8}{subsubsection.5.3.1}%
+\contentsline {subsubsection}{\numberline {5.3.2}展示链}{8}{subsubsection.5.3.2}%
+\contentsline {subsubsection}{\numberline {5.3.3}存储链}{8}{subsubsection.5.3.3}%
+\contentsline {section}{\numberline {6}第三部分：项目运行流程}{9}{section.6}%
+\contentsline {section}{\numberline {7}上电初始化}{9}{section.7}%
+\contentsline {section}{\numberline {8}主循环调度}{9}{section.8}%
+\contentsline {section}{\numberline {9}中断流程}{10}{section.9}%
+\contentsline {section}{\numberline {10}通信流程}{10}{section.10}%
+\contentsline {subsection}{\numberline {10.1}GPS}{10}{subsection.10.1}%
+\contentsline {subsection}{\numberline {10.2}Web}{11}{subsection.10.2}%
+\contentsline {section}{\numberline {11}状态机}{11}{section.11}%
+\contentsline {subsection}{\numberline {11.1}音频录制}{11}{subsection.11.1}%
+\contentsline {subsection}{\numberline {11.2}性能测试}{11}{subsection.11.2}%
+\contentsline {section}{\numberline {12}第四部分：核心模块解析}{12}{section.12}%
+\contentsline {section}{\numberline {13}\texttt {main.cpp}：系统装配与输出层}{12}{section.13}%
+\contentsline {section}{\numberline {14}\texttt {mpu6050}：高振动车辆 IMU 前端}{12}{section.14}%
+\contentsline {section}{\numberline {15}\texttt {gps\_module}：GPS、速度与性能计时}{12}{section.15}%
+\contentsline {section}{\numberline {16}\texttt {performance\_analyzer}：派生指标与摩托语义}{13}{section.16}%
+\contentsline {section}{\numberline {17}\texttt {audio\_recorder}：低码率事件录音}{13}{section.17}%
+\contentsline {section}{\numberline {18}\texttt {sd\_logger}：行驶 CSV}{14}{section.18}%
+\contentsline {section}{\numberline {19}\texttt {data/index.html}：无 App Web 仪表盘}{14}{section.19}%
+\contentsline {section}{\numberline {20}\texttt {cad/pcb1\_enclosure.scad}：参数化产品外壳}{14}{section.20}%
+\contentsline {section}{\numberline {21}第五部分：技术知识提取}{15}{section.21}%
+\contentsline {section}{\numberline {22}双 I2C}{15}{section.22}%
+\contentsline {subsection}{\numberline {22.1}为什么需要它}{15}{subsection.22.1}%
+\contentsline {subsection}{\numberline {22.2}项目中的实际应用}{15}{subsection.22.2}%
+\contentsline {subsection}{\numberline {22.3}常见 Bug 与调试}{15}{subsection.22.3}%
+\contentsline {section}{\numberline {23}UART 与 NMEA}{15}{section.23}%
+\contentsline {section}{\numberline {24}采样与数字滤波}{15}{section.24}%
+\contentsline {section}{\numberline {25}GPS 静止漂移}{16}{section.25}%
+\contentsline {section}{\numberline {26}GPS-IMU 融合}{16}{section.26}%
+\contentsline {section}{\numberline {27}ADC、Timer 与音频}{16}{section.27}%
+\contentsline {section}{\numberline {28}SPI、SD 与文件系统}{17}{section.28}%
+\contentsline {section}{\numberline {29}Wi-Fi 与 HTTP}{17}{section.29}%
+\contentsline {section}{\numberline {30}第六部分：设计决策分析}{17}{section.30}%
+\contentsline {section}{\numberline {31}双 I2C 而不是共享总线}{17}{section.31}%
+\contentsline {section}{\numberline {32}协作式调度而不是 FreeRTOS 任务}{17}{section.32}%
+\contentsline {section}{\numberline {33}多级滤波而不是单一滤波器}{18}{section.33}%
+\contentsline {section}{\numberline {34}互补滤波而不是 EKF}{18}{section.34}%
+\contentsline {section}{\numberline {35}阈值状态机}{18}{section.35}%
+\contentsline {section}{\numberline {36}浏览器端导出}{18}{section.36}%
+\contentsline {section}{\numberline {37}第七部分：调试与踩坑记录}{19}{section.37}%
+\contentsline {section}{\numberline {38}调试记录 1：文档与固件接线冲突}{19}{section.38}%
+\contentsline {section}{\numberline {39}调试记录 2：音频丢采样}{19}{section.39}%
+\contentsline {section}{\numberline {40}调试记录 3：SD 功能看似存在但不工作}{19}{section.40}%
+\contentsline {section}{\numberline {41}调试记录 4：倾角动态响应可能错误}{19}{section.41}%
+\contentsline {section}{\numberline {42}调试记录 5：GPS 模式不一致}{20}{section.42}%
+\contentsline {section}{\numberline {43}调试记录 6：启动顺序与 SPIFFS}{20}{section.43}%
+\contentsline {section}{\numberline {44}调试记录 7：融合字段与 API 不一致}{20}{section.44}%
+\contentsline {section}{\numberline {45}调试记录 8：HTTP 文件下载路径}{20}{section.45}%
+\contentsline {section}{\numberline {46}调试记录 9：字符串与缓冲区}{20}{section.46}%
+\contentsline {section}{\numberline {47}调试记录 10：编码损坏}{21}{section.47}%
+\contentsline {section}{\numberline {48}第八部分：工程实践总结}{21}{section.48}%
+\contentsline {subsection}{\numberline {48.1}做得好的地方}{21}{subsection.48.1}%
+\contentsline {subsection}{\numberline {48.2}可以改进的地方}{21}{subsection.48.2}%
+\contentsline {subsubsection}{\numberline {48.2.1}代码组织}{21}{subsubsection.48.2.1}%
+\contentsline {subsubsection}{\numberline {48.2.2}配置管理}{21}{subsubsection.48.2.2}%
+\contentsline {subsubsection}{\numberline {48.2.3}日志}{22}{subsubsection.48.2.3}%
+\contentsline {subsubsection}{\numberline {48.2.4}错误处理}{22}{subsubsection.48.2.4}%
+\contentsline {subsubsection}{\numberline {48.2.5}测试策略}{22}{subsubsection.48.2.5}%
+\contentsline {subsubsection}{\numberline {48.2.6}构建与 CI}{22}{subsubsection.48.2.6}%
+\contentsline {section}{\numberline {49}第九部分：项目复盘}{23}{section.49}%
+\contentsline {subsection}{\numberline {49.1}最大的亮点}{23}{subsection.49.1}%
+\contentsline {subsection}{\numberline {49.2}最大的难点}{23}{subsection.49.2}%
+\contentsline {subsection}{\numberline {49.3}学到的知识}{23}{subsection.49.3}%
+\contentsline {subsection}{\numberline {49.4}如果重新设计}{23}{subsection.49.4}%
+\contentsline {subsection}{\numberline {49.5}下一步扩展}{23}{subsection.49.5}%
+\contentsline {section}{\numberline {50}第十部分：个人知识地图}{24}{section.50}%
+\contentsline {section}{\numberline {51}Embedded Knowledge Map}{24}{section.51}%
+\contentsline {subsection}{\numberline {51.1}长期维护入口}{26}{subsection.51.1}%

@@ -1,10 +1,54 @@
-\contentsline {section}{\numberline {1}项目背景一句话介绍}{2}{section.1}%
-\contentsline {section}{\numberline {2}系统架构与数据流}{2}{section.2}%
-\contentsline {section}{\numberline {3}问题一：IMU 被发动机振动淹没}{3}{section.3}%
-\contentsline {section}{\numberline {4}问题二：姿态角只用加速度计的局限}{5}{section.4}%
-\contentsline {section}{\numberline {5}问题三：GPS 静止零漂}{6}{section.5}%
-\contentsline {section}{\numberline {6}问题四：GPS--IMU 融合与动态信心度}{7}{section.6}%
-\contentsline {section}{\numberline {7}问题五：IMU 加速度偏置（Zero-g Offset）校准}{9}{section.7}%
-\contentsline {section}{\numberline {8}问题六：GPS 位置跳变过滤}{10}{section.8}%
-\contentsline {section}{\numberline {9}我目前的已知缺口与改进方向}{11}{section.9}%
-\contentsline {section}{\numberline {10}面试常见追问 Q\&A 汇总}{12}{section.10}%
+\contentsline {section}{\numberline {1}项目定位与核心挑战}{3}{section.1}%
+\contentsline {subsection}{\numberline {1.1}一句话定位}{3}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}三大核心工程挑战}{3}{subsection.1.2}%
+\contentsline {section}{\numberline {2}硬件架构详解}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}主控：ESP32-WROOM-32}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}IMU：MPU6050}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}GPS：GT-U7}{4}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}OLED：SSD1306}{4}{subsection.2.4}%
+\contentsline {subsection}{\numberline {2.5}麦克风：模拟咪}{4}{subsection.2.5}%
+\contentsline {subsection}{\numberline {2.6}存储：SPIFFS}{4}{subsection.2.6}%
+\contentsline {section}{\numberline {3}软件架构详解}{4}{section.3}%
+\contentsline {subsection}{\numberline {3.1}整体分层结构}{4}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}任务调度（时间驱动轮询）}{5}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}模块划分与文件职责}{5}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}数据流向（端到端）}{5}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Wi-Fi 与 Web 接口架构}{5}{subsection.3.5}%
+\contentsline {section}{\numberline {4}信号处理链全解析（核心，必考）}{6}{section.4}%
+\contentsline {subsection}{\numberline {4.1}IMU 三级滤波链}{6}{subsection.4.1}%
+\contentsline {subsubsection}{\numberline {4.1.1}问题背景：为什么需要三级}{6}{subsubsection.4.1.1}%
+\contentsline {subsubsection}{\numberline {4.1.2}第一级：硬件 DLPF（截止 94\,Hz）}{6}{subsubsection.4.1.2}%
+\contentsline {subsubsection}{\numberline {4.1.3}第二级：10 点滑动平均（FIR，截止约 10\,Hz）}{6}{subsubsection.4.1.3}%
+\contentsline {subsubsection}{\numberline {4.1.4}第三级：一阶 IIR 低通（$\alpha = 0.1$，截止约 3.2\,Hz）}{6}{subsubsection.4.1.4}%
+\contentsline {subsubsection}{\numberline {4.1.5}三级总效果}{6}{subsubsection.4.1.5}%
+\contentsline {subsection}{\numberline {4.2}姿态角计算（两套并行输出）}{6}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}GPS 速度三层抑制}{6}{subsection.4.3}%
+\contentsline {subsubsection}{\numberline {4.3.1}问题本质}{6}{subsubsection.4.3.1}%
+\contentsline {subsubsection}{\numberline {4.3.2}第一层：20 点滑动均值 + 统计特征分析}{7}{subsubsection.4.3.2}%
+\contentsline {subsubsection}{\numberline {4.3.3}第二层：自适应 IIR（按速度段切换系数）}{7}{subsubsection.4.3.3}%
+\contentsline {subsubsection}{\numberline {4.3.4}第三层：基于信号质量的最终死区}{7}{subsubsection.4.3.4}%
+\contentsline {subsection}{\numberline {4.4}IMU 偏置校准体系}{7}{subsection.4.4}%
+\contentsline {subsubsection}{\numberline {4.4.1}偏置的三个来源}{7}{subsubsection.4.4.1}%
+\contentsline {subsubsection}{\numberline {4.4.2}在线递推校准（GPS 辅助）}{7}{subsubsection.4.4.2}%
+\contentsline {subsubsection}{\numberline {4.4.3}手动校准 vs 在线校准的分工}{7}{subsubsection.4.4.3}%
+\contentsline {subsection}{\numberline {4.5}GPS--IMU 融合与动态信心度}{7}{subsection.4.5}%
+\contentsline {subsubsection}{\numberline {4.5.1}融合目标与基本策略}{7}{subsubsection.4.5.1}%
+\contentsline {subsubsection}{\numberline {4.5.2}动态信心度的计算}{8}{subsubsection.4.5.2}%
+\contentsline {subsubsection}{\numberline {4.5.3}融合的五步计算流程}{8}{subsubsection.4.5.3}%
+\contentsline {subsubsection}{\numberline {4.5.4}峰值更新策略}{8}{subsubsection.4.5.4}%
+\contentsline {subsubsection}{\numberline {4.5.5}与卡尔曼滤波的关系与对比}{8}{subsubsection.4.5.5}%
+\contentsline {subsection}{\numberline {4.6}摩托车专用模式：互补滤波倾角}{8}{subsection.4.6}%
+\contentsline {subsubsection}{\numberline {4.6.1}为什么这里实现了互补滤波而全局姿态角没有}{8}{subsubsection.4.6.1}%
+\contentsline {subsubsection}{\numberline {4.6.2}互补滤波原理}{8}{subsubsection.4.6.2}%
+\contentsline {subsubsection}{\numberline {4.6.3}本项目参数：$\alpha = 0.96$}{9}{subsubsection.4.6.3}%
+\contentsline {subsubsection}{\numberline {4.6.4}防漂移措施：积分变量反写}{9}{subsubsection.4.6.4}%
+\contentsline {subsubsection}{\numberline {4.6.5}坐标系映射}{9}{subsubsection.4.6.5}%
+\contentsline {subsubsection}{\numberline {4.6.6}翘头/翘尾/弯道检测逻辑}{9}{subsubsection.4.6.6}%
+\contentsline {section}{\numberline {5}业务层：性能测试状态机}{9}{section.5}%
+\contentsline {subsection}{\numberline {5.1}加速测试流程}{9}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}制动测试流程}{9}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}圈速计时}{9}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}功率估算}{9}{subsection.5.4}%
+\contentsline {section}{\numberline {6}面试高频追问 Q\&A（精简版）}{9}{section.6}%
+\contentsline {section}{\numberline {7}已知缺口（面试时主动说）}{11}{section.7}%
+\contentsline {section}{\numberline {8}关键数字速查表（面试时直接报）}{11}{section.8}%
