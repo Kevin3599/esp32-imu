@@ -23,3 +23,9 @@
 *.ilg
 *.ind
 *.dvi
+
+# 已备份到 D:\esp32-imu-backup\ 的产物/临时文件
+EMBEDDED_KNOWLEDGE_BASE.pdf
+KNOWLEDGE_BASE.pdf
+can_write_probe.tmp
+*.tmp
