@@ -1,0 +1,2 @@
+# 文档类 TeX 源文件不计入 GitHub 语言统计
+*.tex linguist-documentation
