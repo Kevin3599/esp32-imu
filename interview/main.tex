@@ -166,7 +166,7 @@ ESP32 有双核，传感器又有两个，整个数据流是怎么组织的？
 \textbf{数据链路（自下而上）}：
 \begin{enumerate}[leftmargin=1.4em,topsep=2pt,itemsep=2pt]
   \item \textbf{硬件层}：MPU6050 通过 I2C 接入；GT-U7 通过 UART 输出 NMEA 句。
-  \item \textbf{采样层}：IMU 200\,Hz 中断采样写环形缓冲；GPS 10\,Hz 由 TinyGPS++ 解析。
+  \item \textbf{采样层}：IMU 由 \texttt{millis()} 以 200\,Hz 周期轮询读取；GPS 10\,Hz 由 TinyGPS++ 解析。
   \item \textbf{滤波层}：IMU 走 ``DLPF $\to$ 滑动平均 $\to$ 一阶 IIR'' 三级；GPS 走 ``滑动平均 $\to$ 自适应 IIR $\to$ 死区''。
   \item \textbf{融合层}：基于 GPS 实时稳定性算\textbf{动态信心度} $\in [0,1]$，融合 IMU 加速度和 GPS 速度差分。
   \item \textbf{业务层}：加速测试状态机（待触发／计时中／完成）、圈速判定、距离统计。
@@ -186,6 +186,117 @@ A：我没做严格的时间对齐，而是\textbf{在 GPS 帧到来的瞬间重
 两帧 GPS 之间的 IMU 数据按上一帧权重独立滤波。
 这种简化在低动态场景下误差可接受，但严格场景需要做预测--更新框架（卡尔曼那一套），属于改进方向。
 \end{followup}
+
+% ============================================================
+\section{问题零：ESP32 如何从 MPU6050 获取数据}
+% ============================================================
+
+\begin{interviewer}
+ESP32 是怎么从 MPU6050 拿到六轴数据的？你用了中断或者环形缓冲区吗？
+\end{interviewer}
+
+\begin{candidate}
+当前实现里，MPU6050 不是中断驱动，而是 \textbf{I2C 主动轮询读取}。
+ESP32 先初始化 I2C0，总线引脚是 SDA=GPIO21、SCL=GPIO22，速率 400\,kHz；
+然后用 Adafruit MPU6050 库连接地址 \texttt{0x68} 的传感器，备用地址是 \texttt{0x69}。
+
+\medskip
+初始化链路可以简化成：
+\begin{lstlisting}
+I2C_MPU.begin(21, 22, 400000);
+mpu.begin(0x68, &I2C_MPU);
+mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+mpu.setFilterBandwidth(MPU6050_BAND_94_HZ);
+\end{lstlisting}
+
+\medskip
+真正读数发生在主循环的 5\,ms 周期任务里：
+\begin{lstlisting}
+if (currentTime - lastIMUTime >= IMU_INTERVAL) {
+  ReadMPU6050();
+  lastIMUTime = currentTime;
+}
+\end{lstlisting}
+其中 \texttt{IMU\_INTERVAL = 5}，所以目标采样频率是 $1000/5 = 200\,Hz$。
+\texttt{ReadMPU6050()} 内部调用：
+\begin{lstlisting}
+sensors_event_t a, g, temp;
+mpu.getEvent(&a, &g, &temp);
+\end{lstlisting}
+\texttt{getEvent()} 会通过 I2C 读取 MPU6050 的加速度、陀螺仪和温度寄存器，
+然后把结果转换成工程单位：加速度是 m/s$^2$，角速度是 rad/s，温度是摄氏度。
+
+\medskip
+读出来的数据会先写入全局结构体：
+\begin{lstlisting}
+mpu6050_data.Acc_X = a.acceleration.x;
+mpu6050_data.Acc_Y = a.acceleration.y;
+mpu6050_data.Acc_Z = a.acceleration.z;
+mpu6050_data.Angle_Velocity_R = g.gyro.x;
+mpu6050_data.Angle_Velocity_P = g.gyro.y;
+mpu6050_data.Angle_Velocity_Y = g.gyro.z;
+\end{lstlisting}
+之后再进入滑动平均、一阶 IIR 和姿态角计算。
+\end{candidate}
+
+\begin{followup}
+\textbf{Q：IMU 模块通过什么方式通信？}\\
+A：MPU6050 和 ESP32 之间用 \textbf{I2C 通信}，不是 SPI，也不是 UART。
+当前项目用 ESP32 的 I2C0，总线配置是 SDA=GPIO21、SCL=GPIO22、速率 400\,kHz；
+MPU6050 默认地址是 \texttt{0x68}，如果 AD0 引脚拉高则可能是 \texttt{0x69}。
+代码里通过 \texttt{I2C\_MPU.begin(21, 22, 400000)} 建立总线，再用
+\texttt{mpu.begin(0x68, \&I2C\_MPU)} 把 Adafruit MPU6050 对象绑定到这条总线。
+
+\medskip
+\textbf{Q：从 IMU 获取数据的整个流程是什么？}\\
+A：完整链路是：ESP32 初始化 I2C0 $\to$ 初始化 MPU6050 并配置量程和 DLPF $\to$
+主循环用 \texttt{millis()} 判断是否到 5\,ms 采样周期 $\to$ 调用 \texttt{ReadMPU6050()} $\to$
+\texttt{ReadMPU6050()} 内部调用 \texttt{mpu.getEvent()} $\to$ Adafruit 库通过 I2C 读 MPU6050 寄存器 $\to$
+得到三轴加速度、三轴角速度和温度 $\to$ 写入 \texttt{mpu6050\_data} 全局结构体 $\to$
+进入 10 点滑动平均和一阶 IIR 低通滤波 $\to$ 计算 Roll/Pitch，最后供 G 力、摩托倾角、GPS--IMU 融合、OLED 和 Web 使用。
+
+\medskip
+\textbf{Q：IMU 数据多久同步一次？}\\
+A：目标同步周期是 \textbf{5\,ms 一次}。代码里 \texttt{IMU\_INTERVAL = 5}，单位是毫秒，
+因此理论采样频率是 $1000/5 = 200\,Hz$。这里的``同步''可以理解为 ESP32 主动向 MPU6050 查询并刷新一次本地的 \texttt{mpu6050\_data}。
+
+\medskip
+\textbf{Q：接收 IMU 数据是在任务中周期性地查询吗？}\\
+A：是的。当前没有使用 MPU6050 的 Data Ready 中断，而是在 \texttt{loop()} 主循环任务里周期性查询。
+核心判断是 \texttt{currentTime - lastIMUTime >= IMU\_INTERVAL}，满足条件就调用一次 \texttt{ReadMPU6050()}。
+所以准确说法是：\textbf{ESP32 在主循环中周期性轮询 MPU6050，每到 5\,ms 就主动通过 I2C 读取一次 IMU 数据}。
+
+\medskip
+\textbf{Q：查询 IMU 数据的频率是多高？}\\
+A：查询频率是 \textbf{200\,Hz}，也就是每秒 200 次。这个频率来自 5\,ms 的轮询周期：
+$f = 1000\,\text{ms} / 5\,\text{ms} = 200\,Hz$。200\,Hz 的好处是能覆盖急刹、急转等车辆动态，
+同时 I2C 400\,kHz 总线和 ESP32 主循环还能承受。
+
+\medskip
+\textbf{Q：那项目里有没有环形缓冲区？}\\
+A：有一个\textbf{循环下标缓存}，但它不是``中断生产、主循环消费''那种严格意义的采样环形队列。
+它的用途是 10 点滑动平均滤波：每次读到新 IMU 数据，就写入 \texttt{acc\_buffer\_x/y/z} 和
+\texttt{gyro\_buffer\_x/y/z}，然后 \texttt{buffer\_index = (buffer\_index + 1) \% 10} 覆盖最旧样本。
+所以更准确的说法是：\textbf{MPU6050 用 200\,Hz 轮询读取，滤波层维护 10 点循环缓存}。
+
+\medskip
+\textbf{Q：为什么没有用 MPU6050 中断？}\\
+A：这个原型里 200\,Hz 采样已经可以通过 \texttt{millis()} 稳定调度，I2C 读取和滤波开销也能接受。
+中断方案需要额外连接 MPU6050 的 INT 引脚，并处理 ISR、共享数据同步和丢样问题，复杂度更高。
+如果后续要做更严格的固定采样周期，才值得改成 MPU6050 Data Ready 中断触发读取。
+
+\medskip
+\textbf{Q：项目里哪里用了真正的中断？}\\
+A：录音模块用了 ESP32 定时器中断采样 ADC，比如 \texttt{IRAM\_ATTR onSampleTimer()}；
+但那是麦克风音频采样，不是 MPU6050。
+\end{followup}
+
+\begin{summary}
+面试时可以一句话概括：\textbf{ESP32 通过 I2C0 以 400\,kHz 主动轮询 MPU6050，
+主循环每 5\,ms 调一次 \texttt{mpu.getEvent()} 读取三轴加速度、三轴角速度和温度；
+滤波层有 10 点循环缓存做滑动平均，但没有使用 MPU6050 硬件中断采样队列。}
+\end{summary}
 
 % ============================================================
 \section{问题一：IMU 被发动机振动淹没}

@@ -1,4 +1,5 @@
 #include "gps_module.h"
+#include "measurement.h"
 #include "mpu6050.h"  // 添加MPU6050头文件
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
@@ -8,6 +9,7 @@ TinyGPSPlus gps;
 HardwareSerial gpsSerial(2); // 使用Serial2
 GPS_DATA gps_data;
 PERFORMANCE_DATA performance_data;
+static measurement::Timer measurementTimer;
 
 // 性能测试阈值
 const double ACCEL_TEST_START_SPEED = 5.0;    // 5km/h开始加速测试
@@ -37,11 +39,11 @@ bool initGPS() {
         gpsSerial.read();
     }
     
-    Serial.println("配置GPS模块参数 (10Hz模式)...");
+    Serial.println("请求GPS配置 (5Hz，未验证)...");
     
     // ===== 关键：10Hz更新频率 (100ms) =====
-    // GT-U7在9600波特率下支持10Hz，但需要精简NMEA输出
-    gpsSerial.println("$PMTK220,100*2F");
+    // Conservative request at 9600 baud; protocol support must be verified on hardware.
+    gpsSerial.println("$PMTK220,200*2C");
     delay(300);
     
     // 只输出RMC和GGA - 10Hz时必须精简，否则数据溢出
@@ -58,8 +60,8 @@ bool initGPS() {
     gpsSerial.println("$PMTK301,2*2E");
     delay(300);
     
-    Serial.println("GPS模块初始化完成 - 10Hz Dragy模式");
-    Serial.printf("GPS配置: RX=%d, TX=%d, 波特率=%d, 更新率=10Hz\n", 
+    Serial.println("GPS配置指令已发送；需验证协议、应答和实际更新率");
+    Serial.printf("GPS配置: RX=%d, TX=%d, 波特率=%d, 请求更新率=5Hz（未验证）\n",
                   GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
     
     // 初始化性能数据
@@ -87,6 +89,23 @@ void updateGPSData() {
         char c = gpsSerial.read();
         nmea_buffer += c;
         if (gps.encode(c)) {
+            if (gps.speed.isUpdated()) {
+                const double raw = gps.speed.kmph();
+                const unsigned long stamp = millis();
+                gps_data.valid_speed = gps.speed.isValid() && gps.speed.age() <= 1500 && raw >= 0 && raw < 400;
+                if (gps_data.valid_speed) {
+                    const unsigned long elapsed = stamp - gps_data.speed_sample_time;
+                    gps_data.speed_hz = elapsed > 0 && gps_data.speed_sequence > 0 ? 1000.0 / elapsed : 0;
+                    gps_data.raw_speed_kmh = raw;
+                    gps_data.speed_kmh = gps_data.speed_sequence == 0 ? raw : 0.7 * gps_data.speed_kmh + 0.3 * raw;
+                    gps_data.speed_mps = raw / 3.6;
+                    gps_data.speed_ms = gps_data.speed_mps;
+                    gps_data.speed_sample_time = stamp;
+                    ++gps_data.speed_sequence;
+                    gps_data.max_speed_session = max(gps_data.max_speed_session, raw);
+                }
+                measurementTimer.observe(raw, stamp, gps_data.valid_speed);
+            }
             got_new_data = true;
             last_gps_data_time = current_time;
             signal_lost_count = 0;
@@ -112,13 +131,13 @@ void updateGPSData() {
             
             // 发送热重启命令
             gpsSerial.println("$PMTK101*32");
-            delay(100);
+            // Recovery commands are queued without blocking acquisition.
             
             // 重新配置关键参数
             gpsSerial.println("$PMTK220,200*2C"); // 5Hz更新
-            delay(100);
+            // Recovery commands are queued without blocking acquisition.
             gpsSerial.println("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");
-            delay(100);
+            // Recovery commands are queued without blocking acquisition.
             
             last_reconnect_attempt = current_time;
             Serial.printf("GPS恢复尝试完成，信号丢失计数: %d\n", signal_lost_count);
@@ -181,92 +200,6 @@ void updateGPSData() {
             gps_data.valid_time = gps.time.isValid();
         }
         
-        // 更新速度和方向 - 极限优化版本
-        if (gps.speed.isValid()) {
-            double new_speed = gps.speed.kmph();
-            if (new_speed >= 0 && new_speed < 400) {
-                
-                // 极限精度的静止检测 - 适配10Hz高频数据
-                static double speed_buffer[20] = {0}; // 增加缓冲区适配10Hz
-                static int buffer_index = 0;
-                static double speed_sum = 0.0;
-                static int stable_count = 0;
-                
-                // 更新循环缓冲区
-                speed_sum -= speed_buffer[buffer_index];
-                speed_buffer[buffer_index] = new_speed;
-                speed_sum += new_speed;
-                buffer_index = (buffer_index + 1) % 20;
-                
-                double avg_speed = speed_sum / 20.0;
-                
-                // 计算标准差和变化率 - 10Hz高频分析
-                double variance = 0.0;
-                for (int i = 0; i < 20; i++) {
-                    double diff = speed_buffer[i] - avg_speed;
-                    variance += diff * diff;
-                }
-                variance /= 20.0;
-                double std_dev = sqrt(variance);
-                
-                // 10Hz下的动态阈值 - 更精细的控制
-                double signal_quality = (gps_data.satellites >= 8) ? 1.0 : 0.7;
-                double base_threshold = (gps_data.hdop < 1.2) ? 1.0 : 1.6; // 更低阈值
-                double dynamic_threshold = base_threshold / signal_quality;
-                
-                // 10Hz下的稳定性检测 - 更严格标准
-                bool is_speed_stable = (std_dev < 0.2) && (avg_speed < dynamic_threshold); // 更低噪声阈值
-                bool is_acceleration_stable = abs(new_speed - gps_data.speed_kmh) < 0.3; // 更灵敏的加速度检测
-                
-                if (is_speed_stable && is_acceleration_stable) {
-                    stable_count++;
-                    if (stable_count >= 15) { // 10Hz下需要15次稳定(1.5秒)
-                        avg_speed = 0.0;
-                        stable_count = 15; // 防止溢出
-                    }
-                } else if (avg_speed > 2.5) { // 更低的重置阈值
-                    stable_count = 0;
-                }
-                
-                // 10Hz高频自适应滤波 - 更精细的控制
-                double filter_strength;
-                if (avg_speed < 0.5) {
-                    filter_strength = 0.92; // 10Hz下可以使用更强滤波
-                } else if (avg_speed < 1.5) {
-                    filter_strength = 0.80 * signal_quality;
-                } else if (avg_speed < 4.0) {
-                    filter_strength = 0.60 * signal_quality;
-                } else {
-                    filter_strength = 0.35 * signal_quality; // 高速时更快响应
-                }
-                
-                // 应用滤波
-                if (gps_data.valid_speed) {
-                    gps_data.speed_kmh = gps_data.speed_kmh * filter_strength + avg_speed * (1.0 - filter_strength);
-                } else {
-                    gps_data.speed_kmh = avg_speed;
-                }
-                
-                // 10Hz下的最终精密死区处理
-                double final_threshold = (gps_data.satellites >= 8 && gps_data.hdop < 1.0) ? 0.8 : 1.2;
-                if (gps_data.speed_kmh < final_threshold) {
-                    gps_data.speed_kmh = 0.0;
-                }
-                
-                gps_data.speed_mps = gps_data.speed_kmh / 3.6;
-                gps_data.valid_speed = true;
-                
-                // 更新最高速度
-                if (gps_data.speed_kmh > 1.5 && gps_data.speed_kmh > gps_data.max_speed_session) {
-                    gps_data.max_speed_session = gps_data.speed_kmh;
-                }
-            } else {
-                gps_data.valid_speed = false;
-            }
-        } else {
-            gps_data.valid_speed = false;
-        }
-        
         if (gps.course.isValid()) {
             double new_course = gps.course.deg();
             if (new_course >= 0 && new_course <= 360) {
@@ -325,116 +258,41 @@ void updateGPSData() {
         }
     } // 闭合got_new_data的if语句
     
-    // 计算性能指标
+    gps_data.fix_age = gps.location.age();
+    if (gps_data.fix_age > 1500) gps_data.valid_location = false;
+    if (gps_data.speed_sequence == 0 || millis() - gps_data.speed_sample_time > 1500) {
+        gps_data.valid_speed = false;
+        measurementTimer.invalidate();
+    }
     calculatePerformanceMetrics();
     
-    // IMU-GPS融合将在后续实现
+    // IMU prediction runs on its own sampling cadence.
 }
 
 /**
  * 计算性能指标
  */
 void calculatePerformanceMetrics() {
-    if (!gps_data.valid_speed || !gps_data.valid_location) return;
-    
-    unsigned long current_time = millis();
-    double current_speed = gps_data.speed_kmh;
-    
-    // 加速测试逻辑
-    if (!performance_data.accel_test_active && 
-        current_speed >= ACCEL_TEST_START_SPEED && 
-        current_speed < ACCEL_TEST_60_SPEED) {
-        startAccelTest();
-    }
-    
-    if (performance_data.accel_test_active) {
-        unsigned long elapsed = current_time - performance_data.accel_start_time;
-        
-        // 记录0-60km/h时间
-        if (performance_data.accel_0_60_time == 0.0 && current_speed >= ACCEL_TEST_60_SPEED) {
-            performance_data.accel_0_60_time = elapsed / 1000.0;
-            Serial.printf("0-60km/h: %.2f秒\n", performance_data.accel_0_60_time);
-        }
-        
-        // 记录0-100km/h时间
-        if (performance_data.accel_0_100_time == 0.0 && current_speed >= ACCEL_TEST_100_SPEED) {
-            performance_data.accel_0_100_time = elapsed / 1000.0;
-            Serial.printf("0-100km/h: %.2f秒\n", performance_data.accel_0_100_time);
-        }
-        
-        // 记录100-200km/h时间
-        if (performance_data.accel_100_200_time == 0.0 && current_speed >= ACCEL_TEST_200_SPEED) {
-            performance_data.accel_100_200_time = elapsed / 1000.0;
-            Serial.printf("100-200km/h: %.2f秒\n", performance_data.accel_100_200_time);
-            stopAccelTest();
-        }
-        
-        // 超时停止测试
-        if (elapsed > 30000) { // 30秒超时
-            stopAccelTest();
-        }
-    }
-    
-    // 制动测试逻辑
-    if (!performance_data.brake_test_active && 
-        current_speed >= BRAKE_TEST_START_SPEED) {
-        performance_data.brake_test_active = true;
-        performance_data.brake_start_speed = current_speed;
-        performance_data.brake_start_time = current_time;
-        Serial.printf("开始制动测试 - 起始速度: %.1fkm/h\n", current_speed);
-    }
-    
-    if (performance_data.brake_test_active && current_speed <= BRAKE_TEST_END_SPEED) {
-        unsigned long elapsed = current_time - performance_data.brake_start_time;
-        performance_data.brake_100_0_time = elapsed / 1000.0;
-        Serial.printf("制动测试完成: %.2f秒\n", performance_data.brake_100_0_time);
-        stopBrakeTest();
-    }
-}
-
-/**
- * 开始加速测试
- */
-void startAccelTest() {
-    performance_data.accel_test_active = true;
-    performance_data.accel_start_time = millis();
-    performance_data.accel_0_60_time = 0.0;
-    performance_data.accel_0_100_time = 0.0;
-    performance_data.accel_100_200_time = 0.0;
-    Serial.println("开始加速测试");
-}
-
-/**
- * 停止加速测试
- */
-void stopAccelTest() {
-    performance_data.accel_test_active = false;
-    Serial.println("加速测试结束");
-    saveSessionData();
-}
-
-/**
- * 开始制动测试
- */
-void startBrakeTest() {
-    performance_data.brake_test_active = true;
-    performance_data.brake_start_time = millis();
-    Serial.println("开始制动测试");
-}
-
-/**
- * 停止制动测试
- */
-void stopBrakeTest() {
-    performance_data.brake_test_active = false;
-    Serial.println("制动测试结束");
-    saveSessionData();
+    const bool completed = (measurementTimer.to60 > 0 && measurementTimer.to60 != performance_data.accel_0_60_time) ||
+        (measurementTimer.to100 > 0 && measurementTimer.to100 != performance_data.accel_0_100_time) ||
+        (measurementTimer.from100to200 > 0 && measurementTimer.from100to200 != performance_data.accel_100_200_time) ||
+        (measurementTimer.brake > 0 && measurementTimer.brake != performance_data.brake_100_0_time);
+    performance_data.accel_test_active = measurementTimer.accelerating || measurementTimer.interval100;
+    performance_data.brake_test_active = measurementTimer.braking;
+    performance_data.accel_start_time = measurementTimer.start;
+    performance_data.brake_start_time = measurementTimer.brakeStart;
+    performance_data.accel_0_60_time = measurementTimer.to60;
+    performance_data.accel_0_100_time = measurementTimer.to100;
+    performance_data.accel_100_200_time = measurementTimer.from100to200;
+    performance_data.brake_100_0_time = measurementTimer.brake;
+    if (completed) saveSessionData();
 }
 
 /**
  * 重置性能数据
  */
 void resetPerformanceData() {
+    measurementTimer = measurement::Timer{};
     memset(&performance_data, 0, sizeof(PERFORMANCE_DATA)); // 清零结构体
     performance_data.session_start_time = millis();
     performance_data.session_active = true;
@@ -472,7 +330,7 @@ String formatTime(unsigned long milliseconds) {
  * 保存会话数据到SPIFFS
  */
 void saveSessionData() {
-    if (!SPIFFS.begin(true)) {
+    if (!SPIFFS.begin(false)) {
         Serial.println("SPIFFS初始化失败");
         return;
     }
@@ -485,6 +343,7 @@ void saveSessionData() {
     doc["gps"]["distance"] = gps_data.distance_traveled;
     
     // 保存性能数据
+    doc["measurement_schema"] = 2;
     doc["performance"]["accel_0_60"] = performance_data.accel_0_60_time;
     doc["performance"]["accel_0_100"] = performance_data.accel_0_100_time;
     doc["performance"]["accel_100_200"] = performance_data.accel_100_200_time;
@@ -513,7 +372,7 @@ void saveSessionData() {
  * 从SPIFFS加载会话数据
  */
 void loadSessionData() {
-    if (!SPIFFS.begin(true)) return;
+    if (!SPIFFS.begin(false)) return;
     
     File file = SPIFFS.open("/session.json", FILE_READ);
     if (!file) {
@@ -534,6 +393,7 @@ void loadSessionData() {
     gps_data.max_speed_session = doc["gps"]["max_speed"] | 0.0;
     gps_data.distance_traveled = doc["gps"]["distance"] | 0.0;
     
+    if ((doc["measurement_schema"] | 0) != 2) return;
     performance_data.accel_0_60_time = doc["performance"]["accel_0_60"] | 0.0;
     performance_data.accel_0_100_time = doc["performance"]["accel_0_100"] | 0.0;
     performance_data.accel_100_200_time = doc["performance"]["accel_100_200"] | 0.0;
@@ -576,13 +436,13 @@ void printGPSData() {
     
     Serial.println("=== 性能数据 ===");
     if (performance_data.accel_0_60_time > 0) {
-        Serial.printf("0-60km/h: %.2fs\n", performance_data.accel_0_60_time);
+        Serial.printf("1-60km/h: %.2fs\n", performance_data.accel_0_60_time);
     }
     if (performance_data.accel_0_100_time > 0) {
-        Serial.printf("0-100km/h: %.2fs\n", performance_data.accel_0_100_time);
+        Serial.printf("1-100km/h: %.2fs\n", performance_data.accel_0_100_time);
     }
     if (performance_data.brake_100_0_time > 0) {
-        Serial.printf("100-0km/h制动: %.2fs\n", performance_data.brake_100_0_time);
+        Serial.printf("100-1km/h制动: %.2fs\n", performance_data.brake_100_0_time);
     }
     
     Serial.println();
@@ -606,7 +466,7 @@ bool isGPSDataValid() {
  */
 void calibrateIMUBias(double accel_x, double accel_y) {
     // 只在速度非常低时进行校准
-    if (gps_data.speed_ms < 0.5 && gps_data.calibration_count < 200) {
+    if (gps_data.valid_speed && gps_data.raw_speed_kmh < 1.0 && abs(accel_x) < 0.5 && abs(accel_y) < 0.5 && gps_data.calibration_count < 200) {
         // 累积校准 - 使用前向加速度（假设X轴为前进方向）
         double forward_accel = accel_x;  // 可以根据安装方向调整
         
@@ -636,12 +496,13 @@ void calibrateIMUBias(double accel_x, double accel_y) {
 void fuseIMUSpeed(double accel_x, double accel_y, double dt) {
     static double imu_integrated_speed = 0.0;  // IMU积分速度
     static unsigned long last_fusion_time = 0;
+    static uint32_t corrected_sequence = 0;
     
     unsigned long now = millis();
     
     // 防止异常的dt值
     if (dt <= 0 || dt > 0.1) {
-        dt = 0.005; // 默认5ms
+        return; // Do not integrate across missing samples
     }
     
     // 1. IMU偏置校准（静止时）
@@ -670,25 +531,26 @@ void fuseIMUSpeed(double accel_x, double accel_y, double dt) {
     // 6. GPS-IMU融合（互补滤波）
     // 当GPS速度有效时，用GPS拉回IMU漂移
     if (gps_data.valid_speed && gps_data.satellites >= 4) {
-        double gps_speed = gps_data.speed_kmh / 3.6; // 转换为m/s
+        double gps_speed = gps_data.raw_speed_kmh / 3.6; // 转换为m/s
         
         // 融合系数：GPS权重0.1，IMU权重0.9（每次GPS更新时）
         // 这意味着每100ms GPS会拉回10%的误差
         const double GPS_CORRECTION_RATE = 0.1;
         
         // 检测是否是新的GPS数据
-        if (now - gps_data.last_gps_time > 80) { // 新的GPS数据（约100ms间隔）
+        if (corrected_sequence != gps_data.speed_sequence) { // 新的GPS数据（约100ms间隔）
             // 逐渐将IMU积分速度拉向GPS速度
             imu_integrated_speed = imu_integrated_speed * (1.0 - GPS_CORRECTION_RATE) 
                                   + gps_speed * GPS_CORRECTION_RATE;
             
-            gps_data.last_gps_time = now;
+            corrected_sequence = gps_data.speed_sequence;
+            gps_data.last_gps_time = gps_data.speed_sample_time;
             gps_data.last_gps_speed_ms = gps_speed;
         }
     }
     
     // 7. 静止时强制归零
-    if (gps_data.speed_ms < 0.3 && abs(forward_accel) < 0.5) {
+    if (gps_data.valid_speed && gps_data.speed_ms < 0.3 && abs(forward_accel) < 0.5) {
         imu_integrated_speed *= 0.95; // 逐渐衰减
         if (abs(imu_integrated_speed) < 0.1) {
             imu_integrated_speed = 0.0;
@@ -710,48 +572,9 @@ void fuseIMUSpeed(double accel_x, double accel_y, double dt) {
  */
 double getFusedSpeedKmh() {
     // 如果融合速度可用，返回融合速度；否则返回GPS速度
+    if (!gps_data.valid_speed) return 0.0;
     if (gps_data.imu_calibrated && gps_data.fused_speed_ms > 0) {
         return gps_data.smooth_speed_kmh;
     }
     return gps_data.speed_kmh;
-}
-
-/**
- * 速度阈值穿越插值 - 用于精确测量0-100等事件
- * 
- * 原理：当检测到速度穿越目标阈值时，用线性插值计算精确穿越时刻
- * 这可以将10Hz GPS的~100ms不确定度降低到~10-20ms
- * 
- * @param target_speed_kmh 目标速度 (km/h)
- * @param crossing_time 输出：精确穿越时刻 (ms)
- * @return 穿越时的精确速度
- */
-double interpolateSpeedAtTime(double target_speed_kmh, unsigned long* crossing_time) {
-    static double prev_speed = 0.0;
-    static unsigned long prev_time = 0;
-    
-    double current_speed = getFusedSpeedKmh();
-    unsigned long current_time = millis();
-    
-    // 检测速度穿越
-    if (prev_speed < target_speed_kmh && current_speed >= target_speed_kmh) {
-        // 上升穿越 - 线性插值计算精确时刻
-        double speed_diff = current_speed - prev_speed;
-        double target_diff = target_speed_kmh - prev_speed;
-        
-        if (speed_diff > 0) {
-            double ratio = target_diff / speed_diff;
-            unsigned long time_diff = current_time - prev_time;
-            *crossing_time = prev_time + (unsigned long)(time_diff * ratio);
-            
-            prev_speed = current_speed;
-            prev_time = current_time;
-            return target_speed_kmh;
-        }
-    }
-    
-    prev_speed = current_speed;
-    prev_time = current_time;
-    *crossing_time = 0; // 未穿越
-    return current_speed;
 }

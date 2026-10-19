@@ -23,11 +23,13 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <SPIFFS.h>
+#include <ArduinoJson.h>
 #include "mpu6050.h"
 #include "gps_module.h"
 #include "performance_analyzer.h"
 #include "audio_recorder.h"
 #include "sd_logger.h"
+#include "measurement.h"
 
 // I²C双路总线引脚定义
 // I2C0 - MPU6050传感器
@@ -66,6 +68,7 @@ unsigned long lastUpdateTime = 0;
 const unsigned long UPDATE_INTERVAL = 50;      // 50ms显示更新(20Hz)
 
 unsigned long lastIMUTime = 0;
+uint32_t imuSamples = 0, imuOverruns = 0, imuLastIntervalUs = 0;
 const unsigned long IMU_INTERVAL = 5;          // 5ms IMU采样(200Hz) - 用于GPS-IMU融合
 
 unsigned long lastGPSTime = 0;
@@ -115,27 +118,13 @@ void handleRoot() {
 
 void handleData() {
     // 简化数据处理 - 减少计算负载
-    float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;
-    float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;
-    float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;
+    float acc_x_corrected = mpu6050_data.Acc_X_Filtered;
+    float acc_y_corrected = mpu6050_data.Acc_Y_Filtered;
+    float acc_z_corrected = mpu6050_data.Acc_Z_Filtered;
     
-    // 简化角度计算
-    float roll = atan2(acc_z_corrected, acc_x_corrected) * 57.2958;  // 57.2958 = 180/PI
-    float pitch = atan2(acc_y_corrected, acc_x_corrected) * 57.2958;
-    
-    // 简单滤波 - 只在必要时使用
-    static float prev_roll = 0.0, prev_pitch = 0.0;
-    static bool first_run = true;
-    
-    if (!first_run) {
-        // 简单的均值滤波
-        roll = (prev_roll + roll) * 0.5;
-        pitch = (prev_pitch + pitch) * 0.5;
-    }
-    first_run = false;
-    prev_roll = roll;
-    prev_pitch = pitch;
-    
+    const float roll = moto_data.lean_angle_filtered;
+    const float pitch = moto_data.wheelie_angle;
+
     // 构建高精度JSON响应 - 最大化性能
     char json_buffer[750];
     
@@ -185,7 +174,7 @@ void handleData() {
         safe_speed,                 // 融合后的最终速度
         gps_data.speed_kmh,         // 原GPS速度
         0.0,                        // IMU积分速度(暂未实现)
-        100.0,                      // 速度可信度(默认100%)
+        gps_data.valid_speed ? assessGPSQuality() * 100.0 : 0.0, // Heuristic quality, not statistical confidence
         gps_data.max_speed_session,
         gps_data.satellites,
         (gps_data.valid_location && gps_data.satellites >= 6) ? "true" : "false",
@@ -218,7 +207,7 @@ void handleData() {
  */
 void handleMotoData() {
     // 更新摩托车数据
-    updateMotorcycleData();
+
     
     char json_buffer[600];
     
@@ -430,9 +419,9 @@ void updateDisplay() {
   // X=10.25, Y=-0.5, Z=0.5 说明X轴垂直向下
   // 重新校准：假设静止时X轴应该是-9.8 (向下)
   // 垂直安装校准参数
-  float acc_x_corrected = mpu6050_data.Acc_X_Filtered - 0.47;  // 校准偏移 (10.25-9.8)
-  float acc_y_corrected = mpu6050_data.Acc_Y_Filtered + 0.5;   // 校准Y轴偏移
-  float acc_z_corrected = mpu6050_data.Acc_Z_Filtered - 0.48;  // 微调Z轴偏移
+  float acc_x_corrected = mpu6050_data.Acc_X_Filtered;  // 校准偏移 (10.25-9.8)
+  float acc_y_corrected = mpu6050_data.Acc_Y_Filtered;   // 校准Y轴偏移
+  float acc_z_corrected = mpu6050_data.Acc_Z_Filtered;  // 微调Z轴偏移
   
   // 计算校正后的合成加速度
   float corrected_total_accel = sqrt(acc_x_corrected * acc_x_corrected + 
@@ -819,6 +808,29 @@ void setup() {
   // 配置Web服务器路由
   server.on("/", handleRoot);
   server.on("/data", handleData);
+  server.on("/diagnostics", []() {
+    JsonDocument doc;
+    doc["firmware"] = "0.2.0";
+    doc["gps"]["speedValid"] = gps_data.valid_speed;
+    doc["gps"]["rawSpeedKmh"] = gps_data.raw_speed_kmh;
+    doc["gps"]["displaySpeedKmh"] = gps_data.speed_kmh;
+    doc["gps"]["sequence"] = gps_data.speed_sequence;
+    if (gps_data.speed_sequence) doc["gps"]["ageMs"] = millis() - gps_data.speed_sample_time;
+    doc["gps"]["arrivalHz"] = gps_data.speed_hz;
+    doc["gps"]["configurationVerified"] = false;
+    doc["imu"]["samples"] = imuSamples;
+    doc["imu"]["lastIntervalUs"] = imuLastIntervalUs;
+    doc["imu"]["intervalsOver10ms"] = imuOverruns;
+    doc["timing"]["basis"] = "UART arrival time, linear interpolation";
+    doc["timing"]["accel1to60"] = performance_data.accel_0_60_time;
+    doc["timing"]["accel1to100"] = performance_data.accel_0_100_time;
+    doc["timing"]["accel100to200"] = performance_data.accel_100_200_time;
+    doc["timing"]["brake100to1"] = performance_data.brake_100_0_time;
+    String body;
+    serializeJson(doc, body);
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", body);
+  });
   server.on("/moto", handleMotoData);  // 摩托车数据端点
   server.on("/audio", handleAudioData);  // 录音状态端点
   server.on("/audio/control", handleAudioControl);  // 录音控制端点
@@ -840,30 +852,42 @@ void loop() {
   
   // 检查BOOT按钮切换显示模式（GPIO0通常是BOOT按钮）
   static bool lastBootState = HIGH;
+  static unsigned long lastButtonTime = 0;
   bool currentBootState = digitalRead(0);
-  if (lastBootState == HIGH && currentBootState == LOW) {
+  if (lastBootState == HIGH && currentBootState == LOW && millis() - lastButtonTime >= 200) {
     display_mode = (display_mode + 1) % 5; // 切换显示模式: 0=IMU, 1=二维码, 2=GPS, 3=性能, 4=摩托车
-    delay(200); // 防抖
+    lastButtonTime = millis();
   }
   lastBootState = currentBootState;
   
   // 处理串口命令
   handleSerialCommands();
   
+  updateGPSData(); // Drain UART each loop; only new speed observations update timing.
+  currentTime = millis();
+
   // ===== 高频IMU采样 (200Hz) - Dragy模式关键 =====
   if (currentTime - lastIMUTime >= IMU_INTERVAL) {
     ReadMPU6050();  // 200Hz读取IMU数据
     
     // GPS-IMU速度融合 (每次IMU采样都进行)
-    double dt = IMU_INTERVAL / 1000.0; // 转换为秒
-    fuseIMUSpeed(mpu6050_data.Acc_X, mpu6050_data.Acc_Y, dt);
+    static uint32_t previousSampleUs = 0;
+    const uint32_t sampleUs = micros();
+    const double dt = previousSampleUs ? uint32_t(sampleUs - previousSampleUs) / 1000000.0 : 0;
+    imuLastIntervalUs = previousSampleUs ? uint32_t(sampleUs - previousSampleUs) : 0;
+    if (imuLastIntervalUs > 10000) ++imuOverruns;
+    ++imuSamples;
+    previousSampleUs = sampleUs;
+    updateMotorcycleData();
+    fuseIMUSpeed(measurement::forward(mpu6050_data.Acc_Z), measurement::lateral(mpu6050_data.Acc_Y), dt);
+
     
     lastIMUTime = currentTime;
   }
   
   // ===== GPS数据处理 (10Hz) =====
   if (currentTime - lastGPSTime >= GPS_INTERVAL) {
-    updateGPSData(); // 10Hz更新GPS数据
+    // Logging cadence is independent of GNSS observation cadence.
     
     // ===== SD卡数据记录 (10Hz) =====
     // 自动检测是否应该开始/停止记录
@@ -986,11 +1010,11 @@ void displayPerformanceData() {
   
   // 显示测试结果
   if (performance_data.accel_0_100_time > 0) {
-    display.printf("0-100: %.2fs\n", performance_data.accel_0_100_time);
+    display.printf("1-100: %.2fs\n", performance_data.accel_0_100_time);
   }
   
   if (performance_data.brake_100_0_time > 0) {
-    display.printf("100-0: %.2fs\n", performance_data.brake_100_0_time);
+    display.printf("100-1: %.2fs\n", performance_data.brake_100_0_time);
   }
   
   // 显示峰值数据
@@ -1007,7 +1031,7 @@ void displayPerformanceData() {
  */
 void displayMotorcycleData() {
   // 更新摩托车数据
-  updateMotorcycleData();
+
   
   display.clearDisplay();
   display.setTextSize(1);

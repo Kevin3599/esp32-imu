@@ -1,5 +1,6 @@
 #include "performance_analyzer.h"
 #include <math.h>
+#include "measurement.h"
 
 // 全局融合数据对象
 FUSED_PERFORMANCE_DATA fused_data;
@@ -63,6 +64,11 @@ void updateFusedData() {
         }
     }
     
+    if (!gps_data.valid_speed) {
+        fused_data.current_speed_kmh = 0;
+        fused_data.instantaneous_accel = 0;
+    }
+
     // 计算G力
     calculateGForces();
     
@@ -99,135 +105,13 @@ void updateFusedData() {
  * 计算G力
  */
 void calculateGForces() {
-    // 获取精密校准的IMU数据
-    double acc_x = mpu6050_data.Acc_X_Filtered - 0.47;
-    double acc_y = mpu6050_data.Acc_Y_Filtered + 0.5;
-    double acc_z = mpu6050_data.Acc_Z_Filtered - 0.48;
-    
-    // 最大化GPS-IMU融合精度 - 10Hz优化
-    static double gps_speed_history[16] = {0}; // 适配10Hz的更大缓冲区
-    static int gps_history_index = 0;
-    static double imu_confidence = 1.0;
-    
-    // 更新GPS速度历史 - 10Hz高频数据
-    if (gps_data.valid_speed) {
-        gps_speed_history[gps_history_index] = gps_data.speed_kmh;
-        gps_history_index = (gps_history_index + 1) % 16;
-    }
-    
-    // 计算GPS速度稳定性 - 16点分析
-    double gps_variance = 0.0;
-    double gps_avg = 0.0;
-    for (int i = 0; i < 16; i++) {
-        gps_avg += gps_speed_history[i];
-    }
-    gps_avg /= 16.0;
-    
-    for (int i = 0; i < 16; i++) {
-        double diff = gps_speed_history[i] - gps_avg;
-        gps_variance += diff * diff;
-    }
-    gps_variance /= 16.0;
-    
-    // 动态信心度调整
-    double gps_stability = 1.0 / (1.0 + gps_variance);
-    double signal_quality = (gps_data.satellites >= 8 && gps_data.hdop < 1.5) ? 1.0 : 0.6;
-    imu_confidence = gps_stability * signal_quality;
-    
-    // 10Hz下的高精度静止检测
-    bool is_stationary = false;
-    if (gps_data.valid_speed && gps_data.satellites >= 6) {
-        bool gps_stationary = (gps_avg < 1.0 && sqrt(gps_variance) < 0.2); // 10Hz下更严格的标准
-        bool imu_stationary = (abs(acc_x) < 1.2 && abs(acc_y) < 1.2); // 更精细的IMU阈值
-        is_stationary = gps_stationary && imu_stationary;
-    }
-    
-    double raw_accel_g, raw_lateral_g;
-    
-    if (is_stationary) {
-        // 静止状态：使用最小化算法去除重力偏差
-        static double gravity_bias_x = 0.0, gravity_bias_y = 0.0;
-        static int calibration_samples = 0;
-        
-        if (calibration_samples < 50) {
-            gravity_bias_x += acc_x;
-            gravity_bias_y += acc_y;
-            calibration_samples++;
-        } else {
-            gravity_bias_x /= calibration_samples;
-            gravity_bias_y /= calibration_samples;
-        }
-        
-        raw_accel_g = (acc_x - gravity_bias_x) / 9.81;
-        raw_lateral_g = (acc_y - gravity_bias_y) / 9.81;
-        
-        // 静止时强制归零
-        if (abs(raw_accel_g) < 0.02) raw_accel_g = 0.0;
-        if (abs(raw_lateral_g) < 0.02) raw_lateral_g = 0.0;
-    } else {
-        // 动态状态：高精度G力计算
-        raw_accel_g = acc_x / 9.81;
-        raw_lateral_g = acc_y / 9.81;
-        
-        // GPS辅助的重力补偿
-        if (gps_data.valid_speed && gps_data.speed_kmh > 2.0) {
-            // 使用GPS速度变化率估计纵向加速度
-            static double prev_gps_speed = 0.0;
-            static unsigned long prev_time = 0;
-            unsigned long current_time = millis();
-            
-            if (prev_time > 0) {
-                double dt = (current_time - prev_time) / 1000.0;
-                if (dt > 0.05 && dt < 0.5) { // 合理时间间隔
-                    double gps_accel_g = (gps_data.speed_mps - prev_gps_speed/3.6) / (dt * 9.81);
-                    
-                    // 融合GPS和IMU的加速度数据
-                    double fusion_weight = imu_confidence;
-                    raw_accel_g = raw_accel_g * fusion_weight + gps_accel_g * (1.0 - fusion_weight);
-                }
-            }
-            prev_gps_speed = gps_data.speed_mps * 3.6;
-            prev_time = current_time;
-        }
-    }
-    
-    // 自适应高精度滤波器
-    double filter_alpha = is_stationary ? 0.95 : (0.4 + 0.4 * imu_confidence);
-    static double filtered_accel_g = 0.0;
-    static double filtered_lateral_g = 0.0;
-    static bool first_run = true;
-    
-    if (first_run) {
-        filtered_accel_g = raw_accel_g;
-        filtered_lateral_g = raw_lateral_g;
-        first_run = false;
-    } else {
-        filtered_accel_g = filtered_accel_g * filter_alpha + raw_accel_g * (1.0 - filter_alpha);
-        filtered_lateral_g = filtered_lateral_g * filter_alpha + raw_lateral_g * (1.0 - filter_alpha);
-    }
-    
-    // 动态死区处理
-    double deadzone = is_stationary ? 0.01 : (0.02 / (1.0 + imu_confidence));
-    if (abs(filtered_accel_g) < deadzone) filtered_accel_g = 0.0;
-    if (abs(filtered_lateral_g) < deadzone) filtered_lateral_g = 0.0;
-    
-    fused_data.current_accel_g = filtered_accel_g;
-    fused_data.current_lateral_g = filtered_lateral_g;
-    fused_data.current_vertical_g = acc_z / 9.81;
-    
-    // 只在高质量数据时更新峰值
-    if (!is_stationary && imu_confidence > 0.7 && abs(fused_data.current_accel_g) > 0.05) {
-        if (fused_data.current_accel_g > fused_data.session_max_accel_g) {
-            fused_data.session_max_accel_g = fused_data.current_accel_g;
-        }
-        if (fused_data.current_accel_g < -fused_data.session_max_brake_g) {
-            fused_data.session_max_brake_g = -fused_data.current_accel_g;
-        }
-    }
-    
-    if (!is_stationary && abs(fused_data.current_lateral_g) > fused_data.session_max_lateral_g) {
-        fused_data.session_max_lateral_g = abs(fused_data.current_lateral_g);
-    }
+    fused_data.current_accel_g = measurement::forward(mpu6050_data.Acc_Z_Filtered) / 9.81;
+    fused_data.current_lateral_g = measurement::lateral(mpu6050_data.Acc_Y_Filtered) / 9.81;
+    fused_data.current_vertical_g = measurement::vertical(mpu6050_data.Acc_X_Filtered) / 9.81;
+    // Specific force in the mounted frame, not gravity-compensated acceleration.
+    fused_data.session_max_accel_g = max(fused_data.session_max_accel_g, fused_data.current_accel_g);
+    fused_data.session_max_brake_g = max(fused_data.session_max_brake_g, -fused_data.current_accel_g);
+    fused_data.session_max_lateral_g = max(fused_data.session_max_lateral_g, abs(fused_data.current_lateral_g));
 }
 
 /**
@@ -248,16 +132,7 @@ void analyzeDrivingBehavior() {
  * 检测性能事件
  */
 void detectPerformanceEvents() {
-    // 检测起步加速
-    if (detectLaunchStart()) {
-        startAccelTest();
-    }
-    
-    // 检测急刹车
-    if (detectBrakingStart()) {
-        startBrakeTest();
-    }
-    
+    // Timing is driven exclusively by fresh GPS observations.
     // 检测激烈驾驶
     if (detectCorneringStart()) {
         Serial.println("检测到激烈转弯");
@@ -307,7 +182,7 @@ void calibrateIMUForVehicle() {
     // 这里可以实现自动校准逻辑
     // 例如：在静止状态下采集100个样本进行零点校准
     
-    Serial.println("IMU校准完成");
+    Serial.println("使用固定安装坐标；车辆姿态校准尚未实现");
 }
 
 /**
@@ -455,9 +330,9 @@ void updateMotorcycleData() {
     
     // 计算G力 - 垂直安装坐标系映射
     // X轴向下(重力) Y轴左右 Z轴前后
-    double acc_x = mpu6050_data.Acc_X_Filtered - 0.47;  // 垂直方向(重力)
-    double acc_y = mpu6050_data.Acc_Y_Filtered + 0.5;   // 侧向
-    double acc_z = mpu6050_data.Acc_Z_Filtered - 0.48;  // 前后方向
+    double acc_x = mpu6050_data.Acc_X_Filtered;  // 垂直方向(重力)
+    double acc_y = mpu6050_data.Acc_Y_Filtered;   // 侧向
+    double acc_z = mpu6050_data.Acc_Z_Filtered;  // 前后方向
     
     // 摩托车坐标系(垂直安装): Z=前进, Y=侧向, X=垂直
     double raw_forward_g = -acc_z / 9.81;   // Z轴前后(取反，加速为正)
@@ -478,9 +353,9 @@ void updateMotorcycleData() {
                                 moto_data.lateral_g * moto_data.lateral_g);
     
     // 陀螺仪数据 (角速度)
-    moto_data.roll_rate = mpu6050_data.Gyro_Z_Filtered;   // 横滚
-    moto_data.pitch_rate = mpu6050_data.Gyro_Y_Filtered;  // 俯仰
-    moto_data.yaw_rate = mpu6050_data.Gyro_X_Filtered;    // 偏航
+    moto_data.roll_rate = measurement::leanRate(mpu6050_data.Gyro_Z_Filtered);   // 横滚
+    moto_data.pitch_rate = measurement::pitchRate(mpu6050_data.Gyro_Y_Filtered);  // 俯仰
+    moto_data.yaw_rate = mpu6050_data.Gyro_X_Filtered * measurement::radToDeg;    // 偏航
     
     // 检测翘头/翘尾
     detectWheelieStoppie();
@@ -524,13 +399,13 @@ void updateMotorcycleData() {
 void calculateLeanAngle() {
     unsigned long current_time = millis();
     double dt = (current_time - last_moto_update) / 1000.0;  // 秒
-    if (dt <= 0 || dt > 0.5) dt = 0.005;  // 异常保护
+    if (dt <= 0 || dt > 0.1) { last_moto_update = current_time; return; } //  // 异常保护
     last_moto_update = current_time;
     
     // === 加速度计计算倾角 (静态准确，动态有离心力干扰) ===
-    double acc_x = mpu6050_data.Acc_X_Filtered - 0.47;  // 垂直方向(重力)
-    double acc_y = mpu6050_data.Acc_Y_Filtered + 0.5;   // 侧向
-    double acc_z = mpu6050_data.Acc_Z_Filtered - 0.48;  // 前后
+    double acc_x = mpu6050_data.Acc_X_Filtered;  // 垂直方向(重力)
+    double acc_y = mpu6050_data.Acc_Y_Filtered;   // 侧向
+    double acc_z = mpu6050_data.Acc_Z_Filtered;  // 前后
     
     // 加速度计倾角 (Y-X平面) - 取反使右倾为正
     double accel_lean = -atan2(acc_y, abs(acc_x)) * 180.0 / M_PI;
@@ -539,9 +414,9 @@ void calculateLeanAngle() {
     double accel_pitch = atan2(-acc_z, abs(acc_x)) * 180.0 / M_PI;
     
     // === 陀螺仪积分 (动态准确，会漂移) ===
-    // 垂直安装时: 绕Y轴旋转 = 左右倾斜(lean), 绕Z轴旋转 = 前后俯仰(pitch)
-    double gyro_rate_lean = -mpu6050_data.Gyro_Y_Filtered;   // 左右倾斜角速度 (deg/s) - 取反
-    double gyro_rate_pitch = mpu6050_data.Gyro_Z_Filtered;   // 前后俯仰角速度 (deg/s)
+    // 垂直安装：lean 对应绕 Z，pitch 对应绕 Y；符号与加速度倾角公式一致。
+    double gyro_rate_lean = measurement::leanRate(mpu6050_data.Gyro_Z_Filtered);   // 左右倾斜角速度 (deg/s)
+    double gyro_rate_pitch = measurement::pitchRate(mpu6050_data.Gyro_Y_Filtered);   // 前后俯仰角速度 (deg/s)
     
     // 陀螺仪积分
     gyro_lean_angle += gyro_rate_lean * dt;
@@ -550,11 +425,12 @@ void calculateLeanAngle() {
     // === 互补滤波 ===
     // 高通滤波陀螺仪(快速变化) + 低通滤波加速度计(长期稳定)
     // lean = alpha * (lean + gyro*dt) + (1-alpha) * accel_lean
-    double fused_lean = COMPLEMENTARY_ALPHA * (gyro_lean_angle) + 
-                        (1.0 - COMPLEMENTARY_ALPHA) * accel_lean;
+    const double alpha = pow(COMPLEMENTARY_ALPHA, dt / 0.05);
+    double fused_lean = alpha * (gyro_lean_angle) +
+                        (1.0 - alpha) * accel_lean;
     
-    double fused_pitch = COMPLEMENTARY_ALPHA * (gyro_pitch_angle) + 
-                         (1.0 - COMPLEMENTARY_ALPHA) * accel_pitch;
+    double fused_pitch = alpha * (gyro_pitch_angle) +
+                         (1.0 - alpha) * accel_pitch;
     
     // 更新陀螺仪积分值，防止漂移累积
     gyro_lean_angle = fused_lean;

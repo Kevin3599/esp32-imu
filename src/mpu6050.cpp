@@ -160,7 +160,7 @@ void FilterDataForVibration()
   if (buffer_index == 0) buffer_full = true;
   
   // 计算滑动平均
-  int samples_to_use = buffer_full ? FILTER_SAMPLES : buffer_index + 1;
+  int samples_to_use = buffer_full ? FILTER_SAMPLES : buffer_index;
   float acc_x_avg = 0, acc_y_avg = 0, acc_z_avg = 0;
   float gyro_x_avg = 0, gyro_y_avg = 0, gyro_z_avg = 0;
   

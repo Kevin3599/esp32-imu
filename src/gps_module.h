@@ -27,6 +27,10 @@ struct GPS_DATA {
     int centisecond = 0;
     
     // 速度和方向
+    double raw_speed_kmh = 0.0; // Unsmoothed observation for measurement
+    uint32_t speed_sequence = 0;
+    unsigned long speed_sample_time = 0;
+    double speed_hz = 0.0; // Last arrival interval, not a guaranteed navigation rate
     double speed_kmh = 0.0;     // 速度 (km/h)
     double speed_mps = 0.0;     // 速度 (m/s)
     double course = 0.0;        // 航向角度
@@ -74,8 +78,8 @@ struct PERFORMANCE_DATA {
     // 加速测试
     bool accel_test_active = false;
     unsigned long accel_start_time = 0;
-    double accel_0_60_time = 0.0;      // 0-60km/h时间
-    double accel_0_100_time = 0.0;     // 0-100km/h时间
+    double accel_0_60_time = 0.0;      // 1-60km/h时间（保留旧字段名）
+    double accel_0_100_time = 0.0;     // 1-100km/h时间（保留旧字段名）
     double accel_100_200_time = 0.0;   // 100-200km/h时间
     
     // 制动测试
@@ -83,7 +87,7 @@ struct PERFORMANCE_DATA {
     unsigned long brake_start_time = 0;
     double brake_start_speed = 0.0;
     double brake_distance = 0.0;       // 制动距离
-    double brake_100_0_time = 0.0;     // 100-0km/h时间
+    double brake_100_0_time = 0.0; // 100-1 km/h, legacy field name     // 100-0km/h时间
     
     // G力记录
     double max_accel_g = 0.0;          // 最大加速G力
@@ -120,10 +124,6 @@ void updateGPSData();
 void printGPSData();
 bool isGPSDataValid();
 void calculatePerformanceMetrics();
-void startAccelTest();
-void stopAccelTest();
-void startBrakeTest();
-void stopBrakeTest();
 void startLapTiming();
 void stopLapTiming();
 void resetPerformanceData();
@@ -136,6 +136,5 @@ void loadSessionData();
 void fuseIMUSpeed(double accel_x, double accel_y, double dt);
 void calibrateIMUBias(double accel_x, double accel_y);
 double getFusedSpeedKmh();
-double interpolateSpeedAtTime(double target_speed_kmh, unsigned long* crossing_time);
 
 #endif

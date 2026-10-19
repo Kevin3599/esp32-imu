@@ -1,109 +1,68 @@
-# ESP32 双I²C总线 IMU+OLED 项目
+# ESP32 骑行数据记录仪 · v0.2.0
 
-本项目演示如何在ESP32-WROOM-32上使用两个独立的I²C控制器，分别连接MPU6050 IMU传感器和SSD1306 OLED显示屏。
+基于 ESP32-WROOM-32、MPU6050 与 GPS 的骑行采集项目，提供 OLED、Wi-Fi 网页、摩托车姿态分析、SD CSV 和实验性录音。
 
-## 🔌 硬件连接
+本版重点是测量基础修正。软件编译和合成数据回放不代表实际采样率、定位精度或车辆测量精度已通过实测。
 
-### ESP32引脚分配
-```
-MPU6050 (I²C总线0)：
-├── VCC  → 3.3V
-├── GND  → GND  
-├── SDA  → GPIO21
-└── SCL  → GPIO19
+## 接线（以当前源码定义为准）
 
-OLED显示屏 (I²C总线1)：
-├── VCC  → 3.3V
-├── GND  → GND
-├── SDA  → GPIO25  
-└── SCL  → GPIO26
-```
+| 设备 | ESP32 引脚 |
+|---|---|
+| MPU6050 I²C0 | SDA 21，SCL 22 |
+| SSD1306 I²C1 | SDA 18，SCL 19 |
+| GPS UART2 | RX 16 ← GPS TX；TX 17 → GPS RX |
+| SD HSPI | MISO 25，MOSI 13，SCK 14，CS 15 |
+| 模拟麦克风 | GPIO34 |
+| 模式切换按钮 | GPIO0 |
 
-### 接线图说明
-```
-ESP32-WROOM-32
-     ┌─────────────┐
-     │             │
-     │  GPIO19 ────┼──── SCL (MPU6050)
-     │  GPIO21 ────┼──── SDA (MPU6050)  
-     │             │
-     │  GPIO26 ────┼──── SCL (OLED)
-     │  GPIO25 ────┼──── SDA (OLED)
-     │             │
-     │   3.3V ─────┼──── VCC (两个设备)
-     │   GND ─────┼──── GND (两个设备)
-     └─────────────┘
+算法沿用垂直安装约定：传感器 X 向下、Y 侧向、-Z 前向。安装方向改变时，需同步调整姿态与轴映射并重新验证；本版尚无安装向导或完整重力补偿。
+
+## 构建与运行
+
+安装 PlatformIO，执行：
+
+```powershell
+pio run
+# 确认设备串口后执行，默认 COM4
+pio run -t upload
+# 网页标签也有更新；上传文件系统会覆盖原 SPIFFS 内容，先备份录音与会话
+pio run -t uploadfs
 ```
 
-## 📋 物料清单
+平台锁定 espressif32 6.12.0。连接热点 `ESP32-IMU`（密码 `12345678`），打开设备热点地址。首页提供设备诊断链接，`/diagnostics` 返回版本、GPS 原始/显示速度、序号、数据年龄、到达频率与 IMU 采样间隔。
 
-| 组件 | 型号/规格 | 数量 | 备注 |
-|------|-----------|------|------|
-| 微控制器 | ESP32-WROOM-32 | 1 | 主控制器 |
-| IMU传感器 | MPU6050 | 1 | 6轴惯性传感器 |
-| 显示屏 | SSD1306 OLED 128×64 | 1 | I²C接口 |
-| 电阻 | 4.7KΩ | 4 | I²C上拉电阻（可选） |
-| 跳线 | 杜邦线 | 若干 | 连接线 |
+## v0.2.0 测量语义
 
-## 🛠️ 软件环境
+- 起步区间明确为 **1–60、1–100 km/h**；必须先观察到低于 1 km/h 的有效速度才能触发。
+- **100–200 km/h** 独立计时，支持滚动起步；降回 100 以下取消该次计时。
+- **100–1 km/h** 从向下穿越 100 开始，到向下穿越 1 结束；重新超过 100 或超时取消。
+- 使用未平滑的 GPS 速度进行阈值线性插值。计时基准是串口到达时间，尚未补偿接收机延迟。
+- 无效样本或超过 1500ms 的数据间隔打断计时连续性；已完成结果保留。活动测试最多 60 秒。
+- GPS 显示速度单独平滑。IMU 校正仅消费新 GPS 序号，积分使用实际采样间隔；超过 100ms 的间隔不积分。
+- 陀螺仪统一转换成度/秒再与角度融合；摩托车姿态仅在采样路径更新，网页访问不推进积分。
+- G 力是安装坐标系内的比力，不能等同于已经完成重力补偿的车辆线加速度。
 
-### 开发环境
-- **IDE**: Visual Studio Code + PlatformIO
-- **框架**: Arduino Framework
-- **平台**: Espressif 32
+旧 `/data` 字段 `accel0to100`、`brake100to0` 为兼容前端暂保留，含义分别改为 1–100、100–1。新客户端应使用 `/diagnostics` 中明确命名的字段。保存的会话增加 `measurement_schema=2`，不将旧计时结果当成新语义加载。
 
-### 库依赖
-```ini
-lib_deps = 
-    adafruit/Adafruit SSD1306@^2.5.7
-    adafruit/Adafruit GFX Library@^1.11.8
-    electroniccats/MPU6050@^1.0.2
-    wire
+GPS 仍以 9600、8N1 接收，尝试发送 PMTK 5Hz 配置；**芯片协议与配置应答尚未验证**。`arrivalHz` 是最近两条有效速度观测的到达间隔换算值，不是稳定导航频率承诺，也不是实测精度。
+
+## 无硬件回放验证
+
+需要 Python 与 PATH 中的 g++：
+
+```powershell
+python test/run_replay.py
 ```
 
+测试直接编译固件共用的 `src/measurement.h`，覆盖线性加减速、滚动 100–200、采样抖动、重复时间戳、无效数据、断流、启动时已在行驶以及 millis 回绕。
 
+## 硬件验收与后续范围
 
-## 📈 扩展建议
+1. 静止及转动设备，核对轴方向、角速度单位、倾角符号；比较有无网页客户端时的姿态输出。
+2. 在开阔环境记录 `/diagnostics`，确认实际 GPS 到达间隔与协议配置，断开 GPS 后确认 1500ms 后速度失效。
+3. 分别启用 OLED、网页访问、SD 和录音，观察 `intervalsOver10ms` 与 `lastIntervalUs`，不要把目标 200Hz 当成实测值。
+4. 在受控测试条件下，与参考记录设备比较速度和计时；确认延迟后再讨论精度指标。
 
-### 1. 姿态解算
-```cpp
-// 添加四元数或欧拉角计算
-float pitch = atan2(-accelX, sqrt(accelY*accelY + accelZ*accelZ)) * 180/PI;
-float roll = atan2(accelY, accelZ) * 180/PI;
-```
+本版尚未完成：多任务采集队列、GNSS 测量时刻对齐、完整姿态/重力补偿、录音 DMA/环形缓冲、跨重启唯一日志命名、BLE/SPP/TCP 接入和 OTA。录音仍有覆盖未消费样本的风险，SD 仍只记录约 10Hz 快照。
 
-### 2. 数据滤波
-```cpp
-// 添加低通滤波或卡尔曼滤波
-class LowPassFilter {
-private:
-    float alpha;
-    float filteredValue;
-public:
-    LowPassFilter(float cutoff) : alpha(cutoff), filteredValue(0) {}
-    float update(float input) {
-        filteredValue = alpha * input + (1 - alpha) * filteredValue;
-        return filteredValue;
-    }
-};
-```
-
-
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
-
-## 🤝 贡献
-
-欢迎提交 Pull Request 和 Issue！
-
-## 📧 联系方式
-
-如有问题，请提交 GitHub Issue 或发送邮件。
-
----
-
-**项目状态**: ✅ 稳定版本  
-**最后更新**: 2024-12-23  
-**兼容性**: ESP32-WROOM-32, Arduino Framework
+旧知识库与优化分析文档保留为历史材料；其中高频与精度描述不作为本版验收结论。
