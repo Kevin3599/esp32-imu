@@ -119,9 +119,14 @@ bool startLogging() {
     }
     
     // 写入CSV头
-    logFile.println("timestamp,lat,lon,speed_gps,altitude,satellites,hdop,"
-                    "accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,roll,pitch,"
-                    "forward_g,lateral_g,fused_speed");
+    const char* header = "timestamp,lat,lon,speed_gps,altitude,satellites,hdop,"
+                         "accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,roll,pitch,"
+                         "forward_g,lateral_g,fused_speed";
+    if (logFile.println(header) != strlen(header) + 2) {
+        logFile.close();
+        Serial.println("SD header write failed");
+        return false;
+    }
     logFile.flush();
     
     sd_status.logging = true;
@@ -187,7 +192,11 @@ bool logDataPoint(const RideDataPoint& data) {
              data.forward_g, data.lateral_g,
              data.fused_speed);
     
-    logFile.println(buffer);
+    if (logFile.println(buffer) != strlen(buffer) + 2) {
+        auto_log_enabled = false;
+        stopLogging();
+        return false;
+    }
     sd_status.data_points++;
     
     // 每100个点刷新一次

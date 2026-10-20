@@ -26,6 +26,8 @@ enum RecordingState {
 
 // ===== 录音数据结构 =====
 struct AUDIO_RECORDER_DATA {
+    uint32_t dma_overflows = 0; // Observed DMA overflow/error events
+    uint32_t write_errors = 0;
     RecordingState state = RECORDING_IDLE;
     
     // 录音文件信息

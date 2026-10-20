@@ -129,7 +129,7 @@ void stopLapTiming();
 void resetPerformanceData();
 double calculateDistance(double lat1, double lon1, double lat2, double lon2);
 String formatTime(unsigned long milliseconds);
-void saveSessionData();
+void saveSessionData(const GPS_DATA& gps, const PERFORMANCE_DATA& performance);
 void loadSessionData();
 
 // Dragy模式GPS-IMU融合函数

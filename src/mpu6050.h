@@ -58,7 +58,7 @@ void Init_mpu6050();
  * 读取MPU6050传感器数据
  * 包括加速度、角速度和温度
  */
-void ReadMPU6050();
+bool ReadMPU6050(MPU6050_DATA& result);
 
 /**
  * 计算简单的姿态角 (Roll和Pitch)

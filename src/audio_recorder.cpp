@@ -1,6 +1,7 @@
 #include "audio_recorder.h"
 #include "gps_module.h"
-#include <esp_timer.h>
+#include <driver/i2s.h>
+#include "rtos_runtime.h"
 
 // 全局录音数据
 AUDIO_RECORDER_DATA audio_data;
@@ -12,10 +13,32 @@ static File audioFile;
 static uint8_t audioBuffer[AUDIO_BUFFER_SIZE];
 static uint16_t bufferIndex = 0;
 
-// 采样定时器
-static hw_timer_t* sampleTimer = NULL;
-static volatile bool sampleReady = false;
-static volatile uint16_t lastSample = 0;
+// I2S0 ADC DMA owns ADC1 during recording; no ADC calls in an ISR.
+static bool dmaInstalled = false;
+static QueueHandle_t dmaEvents = nullptr;
+static bool startDma() {
+    i2s_config_t config{};
+    config.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN);
+    config.sample_rate = SAMPLE_RATE;
+    config.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+    config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+    config.communication_format = I2S_COMM_FORMAT_STAND_MSB;
+    config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+    config.dma_buf_count = 8;
+    config.dma_buf_len = 256;
+    if (i2s_driver_install(I2S_NUM_0, &config, 16, &dmaEvents) != ESP_OK) return false;
+    dmaInstalled = true;
+    if (i2s_set_adc_mode(ADC_UNIT_1, MIC_ADC_CHANNEL) != ESP_OK || i2s_adc_enable(I2S_NUM_0) != ESP_OK) {
+        i2s_driver_uninstall(I2S_NUM_0); dmaInstalled = false; dmaEvents = nullptr; return false;
+    }
+    return true;
+}
+static void stopDma() {
+    if (!dmaInstalled) return;
+    i2s_adc_disable(I2S_NUM_0);
+    i2s_driver_uninstall(I2S_NUM_0);
+    dmaInstalled = false; dmaEvents = nullptr;
+}
 
 // WAV文件头结构
 struct WAVHeader {
@@ -41,14 +64,6 @@ static unsigned long lastSampleTime = 0;
 // 自动停止计时器
 static unsigned long lowSpeedStartTime = 0;
 static bool waitingToStop = false;
-
-/**
- * 定时器中断 - 采集音频样本
- */
-void IRAM_ATTR onSampleTimer() {
-    lastSample = adc1_get_raw(MIC_ADC_CHANNEL);
-    sampleReady = true;
-}
 
 /**
  * 初始化录音模块
@@ -83,8 +98,7 @@ void initAudioRecorder() {
  */
 void generateFilename() {
     // 使用时间戳生成文件名
-    unsigned long timestamp = millis() / 1000;
-    sprintf(audio_data.filename, "/ride_%lu.wav", timestamp);
+    snprintf(audio_data.filename, sizeof(audio_data.filename), "/ride_%08lx_%08lx.wav", (unsigned long)millis(), (unsigned long)esp_random());
 }
 
 /**
@@ -117,13 +131,17 @@ void updateWAVHeader(File& file, uint32_t dataSize) {
     header.fileSize = dataSize + 36;
     
     file.seek(0);
-    file.write((uint8_t*)&header, sizeof(WAVHeader));
+    if (file.write((uint8_t*)&header, sizeof(WAVHeader)) != sizeof(WAVHeader)) {
+        ++audio_data.write_errors; audio_data.error = true;
+        strcpy(audio_data.error_msg, "WAV header write failed");
+    }
 }
 
 /**
  * 开始录音
  */
 bool startRecording() {
+    if (audio_data.state == RECORDING_PAUSED) { resumeRecording(); return audio_data.state == RECORDING_ACTIVE; }
     if (audio_data.state == RECORDING_ACTIVE) {
         Serial.println("已在录音中");
         return true;
@@ -169,12 +187,15 @@ bool startRecording() {
     sampleCount = 0;
     waitingToStop = false;
     
-    // 启动采样定时器 (8000Hz = 125us间隔)
-    sampleTimer = timerBegin(0, 80, true);  // 80分频 = 1MHz
-    timerAttachInterrupt(sampleTimer, &onSampleTimer, true);
-    timerAlarmWrite(sampleTimer, 125, true);  // 125us = 8kHz
-    timerAlarmEnable(sampleTimer);
-    
+    audio_data.dma_overflows = 0;
+    audio_data.write_errors = 0;
+    if (!startDma()) {
+        audioFile.close();
+        audio_data.error = true;
+        strcpy(audio_data.error_msg, "ADC DMA initialization failed");
+        return false;
+    }
+
     audio_data.state = RECORDING_ACTIVE;
     
     Serial.printf("🎤 开始录音: %s\n", audio_data.filename);
@@ -189,23 +210,20 @@ void stopRecording() {
         return;
     }
     
-    // 停止定时器
-    if (sampleTimer != NULL) {
-        timerAlarmDisable(sampleTimer);
-        timerDetachInterrupt(sampleTimer);
-        timerEnd(sampleTimer);
-        sampleTimer = NULL;
-    }
-    
+    stopDma();
+
     // 写入剩余缓冲区
     if (bufferIndex > 0 && audioFile) {
-        audioFile.write(audioBuffer, bufferIndex);
-        audio_data.file_size += bufferIndex;
+        const size_t written = audioFile.write(audioBuffer, bufferIndex);
+        if (written != bufferIndex) { ++audio_data.write_errors; audio_data.error = true; strcpy(audio_data.error_msg, "Audio write failed"); }
+        audio_data.file_size += written;
+        bufferIndex = 0;
     }
     
     // 更新WAV头
     if (audioFile) {
-        uint32_t dataSize = audio_data.samples_recorded;
+        uint32_t dataSize = audioFile.size() >= sizeof(WAVHeader) ? audioFile.size() - sizeof(WAVHeader) : 0;
+        audio_data.samples_recorded = dataSize;
         updateWAVHeader(audioFile, dataSize);
         audioFile.close();
     }
@@ -227,9 +245,7 @@ void stopRecording() {
  */
 void pauseRecording() {
     if (audio_data.state == RECORDING_ACTIVE) {
-        if (sampleTimer != NULL) {
-            timerAlarmDisable(sampleTimer);
-        }
+        stopDma();
         audio_data.state = RECORDING_PAUSED;
         Serial.println("⏸️ 录音暂停");
     }
@@ -240,8 +256,10 @@ void pauseRecording() {
  */
 void resumeRecording() {
     if (audio_data.state == RECORDING_PAUSED) {
-        if (sampleTimer != NULL) {
-            timerAlarmEnable(sampleTimer);
+        if (!startDma()) {
+            audio_data.error = true;
+            strcpy(audio_data.error_msg, "ADC DMA resume failed");
+            return;
         }
         audio_data.state = RECORDING_ACTIVE;
         Serial.println("▶️ 录音恢复");
@@ -252,42 +270,36 @@ void resumeRecording() {
  * 处理音频采样
  */
 void processSample() {
-    if (!sampleReady || audio_data.state != RECORDING_ACTIVE) {
-        return;
+    if (audio_data.state != RECORDING_ACTIVE || !dmaInstalled) return;
+    i2s_event_t event;
+    while (xQueueReceive(dmaEvents, &event, 0) == pdTRUE) {
+        if (event.type == I2S_EVENT_RX_Q_OVF || event.type == I2S_EVENT_DMA_ERROR) ++audio_data.dma_overflows;
     }
-    sampleReady = false;
-    
-    // 12位ADC转8位
-    uint8_t sample8bit = lastSample >> 4;  // 4096 -> 256
-    
-    // 更新音量指示
-    int16_t centered = (int16_t)sample8bit - 128;
-    audio_data.current_volume = abs(centered);
-    if (audio_data.current_volume > audio_data.peak_volume) {
-        audio_data.peak_volume = audio_data.current_volume;
-    }
-    
-    // 添加到缓冲区
-    audioBuffer[bufferIndex++] = sample8bit;
-    audio_data.samples_recorded++;
-    
-    // 缓冲区满时写入文件
-    if (bufferIndex >= AUDIO_BUFFER_SIZE) {
-        if (audioFile) {
-            audioFile.write(audioBuffer, AUDIO_BUFFER_SIZE);
-            audio_data.file_size += AUDIO_BUFFER_SIZE;
+    uint16_t samples[256];
+    // Bounded drain: other storage commands and log records must also run.
+    for (int block = 0; block < 8; ++block) {
+        size_t bytes = 0;
+        if (i2s_read(I2S_NUM_0, samples, sizeof(samples), &bytes, 0) != ESP_OK || bytes == 0) break;
+        for (size_t i = 0; i < bytes / sizeof(uint16_t); ++i) {
+            const uint8_t value = (samples[i] & 0x0fff) >> 4;
+            audio_data.current_volume = abs(int(value) - 128);
+            audio_data.peak_volume = max(audio_data.peak_volume, audio_data.current_volume);
+            audioBuffer[bufferIndex++] = value;
+            ++audio_data.samples_recorded;
+            if (bufferIndex == AUDIO_BUFFER_SIZE) {
+                size_t written = audioFile.write(audioBuffer, bufferIndex);
+                audio_data.file_size += written;
+                bufferIndex = 0;
+                if (written != AUDIO_BUFFER_SIZE) {
+                    ++audio_data.write_errors; audio_data.error = true;
+                    strcpy(audio_data.error_msg, "Audio write failed");
+                    stopRecording(); return;
+                }
+            }
         }
-        bufferIndex = 0;
     }
-    
-    // 更新时长
     audio_data.duration_ms = millis() - audio_data.start_time;
-    
-    // 检查最大录音时长
-    if (audio_data.duration_ms > MAX_RECORDING_TIME * 1000) {
-        Serial.println("⚠️ 达到最大录音时长，自动停止");
-        stopRecording();
-    }
+    if (audio_data.duration_ms > MAX_RECORDING_TIME * 1000) stopRecording();
 }
 
 /**
@@ -299,10 +311,8 @@ void checkAutoRecordTrigger() {
     }
     
     // 获取当前速度
-    float current_speed = 0.0;
-    if (gps_data.valid_speed) {
-        current_speed = gps_data.speed_kmh;
-    }
+    const auto snapshot = readTelemetry();
+    float current_speed = snapshot.gps.valid_speed && millis() - snapshot.publishedMs < 1500 ? snapshot.gps.speed_kmh : 0;
     
     // 状态机: 自动录音控制
     switch (audio_data.state) {

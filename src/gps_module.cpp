@@ -1,8 +1,10 @@
 #include "gps_module.h"
 #include "measurement.h"
+#include "rtos_runtime.h"
 #include "mpu6050.h"  // 添加MPU6050头文件
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
+#define SENSOR_LOG(...) do {} while (0)
 
 // 全局对象定义
 TinyGPSPlus gps;
@@ -26,47 +28,47 @@ const double LAP_RADIUS = 50.0;                // 起点/终点检测半径(米)
  * 初始化GPS模块 - 针对Dragy风格性能测量优化
  */
 bool initGPS() {
-    Serial.println("正在初始化GPS模块 (Dragy模式)...");
-    
+    SENSOR_LOG("正在初始化GPS模块 (Dragy模式)...");
+
     // 初始化GPS串口 - 使用GT-U7默认的9600波特率
     gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    
+
     // 等待GPS模块启动
     delay(1000);
-    
+
     // 清空串口缓冲区
     while (gpsSerial.available()) {
         gpsSerial.read();
     }
-    
-    Serial.println("请求GPS配置 (5Hz，未验证)...");
-    
+
+    SENSOR_LOG("请求GPS配置 (5Hz，未验证)...");
+
     // ===== 关键：10Hz更新频率 (100ms) =====
     // Conservative request at 9600 baud; protocol support must be verified on hardware.
     gpsSerial.println("$PMTK220,200*2C");
     delay(300);
-    
+
     // 只输出RMC和GGA - 10Hz时必须精简，否则数据溢出
     // RMC包含：时间、位置、速度(Doppler)、航向
     // GGA包含：定位质量、卫星数、HDOP、高度
     gpsSerial.println("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");
     delay(300);
-    
+
     // 启用SBAS增强定位精度
     gpsSerial.println("$PMTK313,1*2E");
     delay(300);
-    
+
     // 设置DGPS模式为WAAS
     gpsSerial.println("$PMTK301,2*2E");
     delay(300);
-    
-    Serial.println("GPS配置指令已发送；需验证协议、应答和实际更新率");
-    Serial.printf("GPS配置: RX=%d, TX=%d, 波特率=%d, 请求更新率=5Hz（未验证）\n",
+
+    SENSOR_LOG("GPS配置指令已发送；需验证协议、应答和实际更新率");
+    SENSOR_LOG("GPS配置: RX=%d, TX=%d, 波特率=%d, 请求更新率=5Hz（未验证）\n",
                   GPS_RX_PIN, GPS_TX_PIN, GPS_BAUD);
-    
+
     // 初始化性能数据
     resetPerformanceData();
-    
+
     return true;
 }
 
@@ -78,16 +80,14 @@ void updateGPSData() {
     static unsigned long last_reconnect_attempt = 0;
     static int signal_lost_count = 0;
     static bool was_connected = false;
-    static unsigned long last_raw_print = 0;
-    
+
     unsigned long current_time = millis();
-    
+
     // 读取GPS数据并打印原始NMEA（每2秒打印一次用于调试）
     bool got_new_data = false;
-    String nmea_buffer = "";
-    while (gpsSerial.available() > 0) {
+    unsigned int budget = 512;
+    while (budget-- && gpsSerial.available() > 0) {
         char c = gpsSerial.read();
-        nmea_buffer += c;
         if (gps.encode(c)) {
             if (gps.speed.isUpdated()) {
                 const double raw = gps.speed.kmph();
@@ -111,38 +111,29 @@ void updateGPSData() {
             signal_lost_count = 0;
         }
     }
-    
-    // 每5秒打印一次原始GPS数据用于调试
-    if (nmea_buffer.length() > 0 && current_time - last_raw_print > 5000) {
-        Serial.println("\n=== GPS原始NMEA数据 ===");
-        Serial.print(nmea_buffer);
-        Serial.printf("字节数: %d, 卫星数(parsed): %d\n", nmea_buffer.length(), gps.satellites.value());
-        Serial.println("========================\n");
-        last_raw_print = current_time;
-    }
-    
+
     // GPS信号监控和恢复
     if (current_time - last_gps_data_time > 3000) { // 3秒没有数据
         signal_lost_count++;
-        
+
         // 每10秒尝试一次恢复
         if (current_time - last_reconnect_attempt > 10000) {
-            Serial.println("GPS信号丢失，尝试恢复...");
-            
+            SENSOR_LOG("GPS信号丢失，尝试恢复...");
+
             // 发送热重启命令
             gpsSerial.println("$PMTK101*32");
             // Recovery commands are queued without blocking acquisition.
-            
+
             // 重新配置关键参数
             gpsSerial.println("$PMTK220,200*2C"); // 5Hz更新
             // Recovery commands are queued without blocking acquisition.
             gpsSerial.println("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*28");
             // Recovery commands are queued without blocking acquisition.
-            
+
             last_reconnect_attempt = current_time;
-            Serial.printf("GPS恢复尝试完成，信号丢失计数: %d\n", signal_lost_count);
+            SENSOR_LOG("GPS恢复尝试完成，信号丢失计数: %d\n", signal_lost_count);
         }
-        
+
         // 标记GPS数据为无效
         if (signal_lost_count > 5) {
             gps_data.valid_location = false;
@@ -151,14 +142,14 @@ void updateGPSData() {
             gps_data.valid_date = false;
         }
     }
-    
+
     // 处理有效的GPS数据
     if (got_new_data) {
         // 更新基础位置信息
         if (gps.location.isValid()) {
             double new_lat = gps.location.lat();
             double new_lon = gps.location.lng();
-            
+
             // 数据合理性检验
             if (abs(new_lat) <= 90.0 && abs(new_lon) <= 180.0) {
                 // 简单的位置跳变检测 (仅在已定位后)
@@ -178,7 +169,7 @@ void updateGPSData() {
         } else {
             gps_data.valid_location = false;
         }
-        
+
         // 更新高度
         if (gps.altitude.isValid()) {
             double new_alt = gps.altitude.meters();
@@ -186,7 +177,7 @@ void updateGPSData() {
                 gps_data.altitude = new_alt;
             }
         }
-        
+
         // 更新时间
         if (gps.date.isValid() && gps.time.isValid()) {
             gps_data.year = gps.date.year();
@@ -199,31 +190,31 @@ void updateGPSData() {
             gps_data.valid_date = gps.date.isValid();
             gps_data.valid_time = gps.time.isValid();
         }
-        
+
         if (gps.course.isValid()) {
             double new_course = gps.course.deg();
             if (new_course >= 0 && new_course <= 360) {
                 gps_data.course = new_course;
             }
         }
-        
+
         // 更新卫星信息 - 增强版
         if (gps.satellites.isValid()) {
             gps_data.satellites = gps.satellites.value();
-            
+
             // 记录卫星数量历史，用于信号质量分析
             static int sat_history[5] = {0};
             static int sat_index = 0;
             sat_history[sat_index] = gps_data.satellites;
             sat_index = (sat_index + 1) % 5;
-            
+
             // 计算平均卫星数量
             int sat_sum = 0;
             for (int i = 0; i < 5; i++) {
                 sat_sum += sat_history[i];
             }
             int avg_sats = sat_sum / 5;
-            
+
             // 信号质量评估
             if (avg_sats >= 10) {
                 gps_data.fix_quality = 2; // 优秀
@@ -233,7 +224,7 @@ void updateGPSData() {
                 gps_data.fix_quality = 0; // 较差
             }
         }
-        
+
         // 更新HDOP信息 - 精密化
         if (gps.hdop.isValid()) {
             double new_hdop = gps.hdop.hdop();
@@ -241,23 +232,23 @@ void updateGPSData() {
                 // HDOP滤波减少噪声
                 static double hdop_filtered = 0.0;
                 static bool hdop_init = false;
-                
+
                 if (!hdop_init) {
                     hdop_filtered = new_hdop;
                     hdop_init = true;
                 } else {
                     hdop_filtered = hdop_filtered * 0.8 + new_hdop * 0.2;
                 }
-                
+
                 gps_data.hdop = hdop_filtered;
-                
+
                 // 精度估计 (基于HDOP的经验公式)
                 gps_data.position_accuracy = hdop_filtered * 2.5; // CEP50估计
                 gps_data.speed_accuracy = hdop_filtered * 0.1;     // 速度精度估计
             }
         }
     } // 闭合got_new_data的if语句
-    
+
     gps_data.fix_age = gps.location.age();
     if (gps_data.fix_age > 1500) gps_data.valid_location = false;
     if (gps_data.speed_sequence == 0 || millis() - gps_data.speed_sample_time > 1500) {
@@ -265,7 +256,7 @@ void updateGPSData() {
         measurementTimer.invalidate();
     }
     calculatePerformanceMetrics();
-    
+
     // IMU prediction runs on its own sampling cadence.
 }
 
@@ -285,7 +276,7 @@ void calculatePerformanceMetrics() {
     performance_data.accel_0_100_time = measurementTimer.to100;
     performance_data.accel_100_200_time = measurementTimer.from100to200;
     performance_data.brake_100_0_time = measurementTimer.brake;
-    if (completed) saveSessionData();
+    if (completed) queueSessionSave();
 }
 
 /**
@@ -305,8 +296,8 @@ double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
     const double R = 6371000.0; // 地球半径(米)
     double dLat = (lat2 - lat1) * PI / 180.0;
     double dLon = (lon2 - lon1) * PI / 180.0;
-    double a = sin(dLat/2) * sin(dLat/2) + 
-               cos(lat1 * PI / 180.0) * cos(lat2 * PI / 180.0) * 
+    double a = sin(dLat/2) * sin(dLat/2) +
+               cos(lat1 * PI / 180.0) * cos(lat2 * PI / 180.0) *
                sin(dLon/2) * sin(dLon/2);
     double c = 2 * atan2(sqrt(a), sqrt(1-a));
     return R * c;
@@ -320,7 +311,7 @@ String formatTime(unsigned long milliseconds) {
     unsigned long minutes = seconds / 60;
     seconds %= 60;
     unsigned long ms = milliseconds % 1000;
-    
+
     char buffer[20];
     sprintf(buffer, "%02lu:%02lu.%03lu", minutes, seconds, ms);
     return String(buffer);
@@ -329,19 +320,15 @@ String formatTime(unsigned long milliseconds) {
 /**
  * 保存会话数据到SPIFFS
  */
-void saveSessionData() {
-    if (!SPIFFS.begin(false)) {
-        Serial.println("SPIFFS初始化失败");
-        return;
-    }
-    
+void saveSessionData(const GPS_DATA& gps_data, const PERFORMANCE_DATA& performance_data) {
+
     // 创建JSON文档
     JsonDocument doc;
-    
+
     // 保存GPS数据
     doc["gps"]["max_speed"] = gps_data.max_speed_session;
     doc["gps"]["distance"] = gps_data.distance_traveled;
-    
+
     // 保存性能数据
     doc["measurement_schema"] = 2;
     doc["performance"]["accel_0_60"] = performance_data.accel_0_60_time;
@@ -353,18 +340,18 @@ void saveSessionData() {
     doc["performance"]["max_lateral_g"] = performance_data.max_lateral_g;
     doc["performance"]["lap_count"] = performance_data.lap_count;
     doc["performance"]["best_lap"] = performance_data.best_lap_time;
-    
+
     // 保存时间戳
     doc["timestamp"] = millis();
-    
+
     // 写入文件
     File file = SPIFFS.open("/session.json", FILE_WRITE);
     if (file) {
         serializeJson(doc, file);
         file.close();
-        Serial.println("会话数据已保存");
+        SENSOR_LOG("会话数据已保存");
     } else {
-        Serial.println("保存会话数据失败");
+        SENSOR_LOG("保存会话数据失败");
     }
 }
 
@@ -373,26 +360,26 @@ void saveSessionData() {
  */
 void loadSessionData() {
     if (!SPIFFS.begin(false)) return;
-    
+
     File file = SPIFFS.open("/session.json", FILE_READ);
     if (!file) {
-        Serial.println("没有找到会话数据文件");
+        SENSOR_LOG("没有找到会话数据文件");
         return;
     }
-    
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
-    
+
     if (error) {
-        Serial.println("解析会话数据失败");
+        SENSOR_LOG("解析会话数据失败");
         return;
     }
-    
+
     // 恢复数据
     gps_data.max_speed_session = doc["gps"]["max_speed"] | 0.0;
     gps_data.distance_traveled = doc["gps"]["distance"] | 0.0;
-    
+
     if ((doc["measurement_schema"] | 0) != 2) return;
     performance_data.accel_0_60_time = doc["performance"]["accel_0_60"] | 0.0;
     performance_data.accel_0_100_time = doc["performance"]["accel_0_100"] | 0.0;
@@ -403,56 +390,56 @@ void loadSessionData() {
     performance_data.max_lateral_g = doc["performance"]["max_lateral_g"] | 0.0;
     performance_data.lap_count = doc["performance"]["lap_count"] | 0;
     performance_data.best_lap_time = doc["performance"]["best_lap"] | 0.0;
-    
-    Serial.println("会话数据已加载");
+
+    SENSOR_LOG("会话数据已加载");
 }
 
 /**
  * 打印GPS数据到串口
  */
 void printGPSData() {
-    Serial.println("=== GPS状态 ===");
-    Serial.printf("卫星数: %d, HDOP: %.2f\n", gps_data.satellites, gps_data.hdop);
-    
+    SENSOR_LOG("=== GPS状态 ===");
+    SENSOR_LOG("卫星数: %d, HDOP: %.2f\n", gps_data.satellites, gps_data.hdop);
+
     if (gps_data.valid_location) {
-        Serial.printf("位置: %.6f, %.6f (高度: %.1fm)\n", 
+        SENSOR_LOG("位置: %.6f, %.6f (高度: %.1fm)\n",
                      gps_data.latitude, gps_data.longitude, gps_data.altitude);
     } else {
-        Serial.println("位置: 无效");
+        SENSOR_LOG("位置: 无效");
     }
-    
+
     if (gps_data.valid_speed) {
-        Serial.printf("速度: %.1f km/h (%.1f m/s)\n", gps_data.speed_kmh, gps_data.speed_mps);
-        Serial.printf("最高速度: %.1f km/h\n", gps_data.max_speed_session);
+        SENSOR_LOG("速度: %.1f km/h (%.1f m/s)\n", gps_data.speed_kmh, gps_data.speed_mps);
+        SENSOR_LOG("最高速度: %.1f km/h\n", gps_data.max_speed_session);
     } else {
-        Serial.println("速度: 无效");
+        SENSOR_LOG("速度: 无效");
     }
-    
+
     if (gps_data.valid_time) {
-        Serial.printf("时间: %04d-%02d-%02d %02d:%02d:%02d\n",
+        SENSOR_LOG("时间: %04d-%02d-%02d %02d:%02d:%02d\n",
                      gps_data.year, gps_data.month, gps_data.day,
                      gps_data.hour, gps_data.minute, gps_data.second);
     }
-    
-    Serial.println("=== 性能数据 ===");
+
+    SENSOR_LOG("=== 性能数据 ===");
     if (performance_data.accel_0_60_time > 0) {
-        Serial.printf("1-60km/h: %.2fs\n", performance_data.accel_0_60_time);
+        SENSOR_LOG("1-60km/h: %.2fs\n", performance_data.accel_0_60_time);
     }
     if (performance_data.accel_0_100_time > 0) {
-        Serial.printf("1-100km/h: %.2fs\n", performance_data.accel_0_100_time);
+        SENSOR_LOG("1-100km/h: %.2fs\n", performance_data.accel_0_100_time);
     }
     if (performance_data.brake_100_0_time > 0) {
-        Serial.printf("100-1km/h制动: %.2fs\n", performance_data.brake_100_0_time);
+        SENSOR_LOG("100-1km/h制动: %.2fs\n", performance_data.brake_100_0_time);
     }
-    
-    Serial.println();
+
+    SENSOR_LOG();
 }
 
 /**
  * 检查GPS数据有效性
  */
 bool isGPSDataValid() {
-    return gps_data.valid_location && gps_data.valid_speed && 
+    return gps_data.valid_location && gps_data.valid_speed &&
            gps_data.satellites >= 4 && gps_data.hdop < 5.0;
 }
 
@@ -469,26 +456,26 @@ void calibrateIMUBias(double accel_x, double accel_y) {
     if (gps_data.valid_speed && gps_data.raw_speed_kmh < 1.0 && abs(accel_x) < 0.5 && abs(accel_y) < 0.5 && gps_data.calibration_count < 200) {
         // 累积校准 - 使用前向加速度（假设X轴为前进方向）
         double forward_accel = accel_x;  // 可以根据安装方向调整
-        
-        gps_data.accel_bias = (gps_data.accel_bias * gps_data.calibration_count + forward_accel) 
+
+        gps_data.accel_bias = (gps_data.accel_bias * gps_data.calibration_count + forward_accel)
                                / (gps_data.calibration_count + 1);
         gps_data.calibration_count++;
-        
+
         if (gps_data.calibration_count == 200) {
             gps_data.imu_calibrated = true;
-            Serial.printf("IMU校准完成: 偏置=%.4f m/s²\n", gps_data.accel_bias);
+            SENSOR_LOG("IMU校准完成: 偏置=%.4f m/s²\n", gps_data.accel_bias);
         }
     }
 }
 
 /**
  * GPS-IMU速度融合 - 互补滤波算法
- * 
+ *
  * 原理：
  * - GPS提供绝对准确但低频(10Hz)的速度
  * - IMU提供高频(200Hz)但会漂移的加速度
  * - 用互补滤波将两者融合：短时靠IMU，长时靠GPS拉回
- * 
+ *
  * @param accel_x X轴加速度 (m/s²) - 假设为前进方向
  * @param accel_y Y轴加速度 (m/s²) - 横向
  * @param dt 时间间隔 (秒)
@@ -497,58 +484,58 @@ void fuseIMUSpeed(double accel_x, double accel_y, double dt) {
     static double imu_integrated_speed = 0.0;  // IMU积分速度
     static unsigned long last_fusion_time = 0;
     static uint32_t corrected_sequence = 0;
-    
+
     unsigned long now = millis();
-    
+
     // 防止异常的dt值
     if (dt <= 0 || dt > 0.1) {
         return; // Do not integrate across missing samples
     }
-    
+
     // 1. IMU偏置校准（静止时）
     calibrateIMUBias(accel_x, accel_y);
-    
+
     // 2. 计算补偿后的前向加速度
     double forward_accel = accel_x;
     if (gps_data.imu_calibrated) {
         forward_accel -= gps_data.accel_bias;
     }
-    
+
     // 3. 死区处理 - 过滤微小噪声
     const double ACCEL_DEADZONE = 0.3; // m/s² 死区
     if (abs(forward_accel) < ACCEL_DEADZONE) {
         forward_accel = 0.0;
     }
-    
+
     // 4. IMU速度积分
     imu_integrated_speed += forward_accel * dt;
-    
+
     // 5. 防止负速度（车辆不能倒退得太快）
     if (imu_integrated_speed < -2.0) {
         imu_integrated_speed = -2.0;
     }
-    
+
     // 6. GPS-IMU融合（互补滤波）
     // 当GPS速度有效时，用GPS拉回IMU漂移
     if (gps_data.valid_speed && gps_data.satellites >= 4) {
         double gps_speed = gps_data.raw_speed_kmh / 3.6; // 转换为m/s
-        
+
         // 融合系数：GPS权重0.1，IMU权重0.9（每次GPS更新时）
         // 这意味着每100ms GPS会拉回10%的误差
         const double GPS_CORRECTION_RATE = 0.1;
-        
+
         // 检测是否是新的GPS数据
         if (corrected_sequence != gps_data.speed_sequence) { // 新的GPS数据（约100ms间隔）
             // 逐渐将IMU积分速度拉向GPS速度
-            imu_integrated_speed = imu_integrated_speed * (1.0 - GPS_CORRECTION_RATE) 
+            imu_integrated_speed = imu_integrated_speed * (1.0 - GPS_CORRECTION_RATE)
                                   + gps_speed * GPS_CORRECTION_RATE;
-            
+
             corrected_sequence = gps_data.speed_sequence;
             gps_data.last_gps_time = gps_data.speed_sample_time;
             gps_data.last_gps_speed_ms = gps_speed;
         }
     }
-    
+
     // 7. 静止时强制归零
     if (gps_data.valid_speed && gps_data.speed_ms < 0.3 && abs(forward_accel) < 0.5) {
         imu_integrated_speed *= 0.95; // 逐渐衰减
@@ -556,14 +543,14 @@ void fuseIMUSpeed(double accel_x, double accel_y, double dt) {
             imu_integrated_speed = 0.0;
         }
     }
-    
+
     // 8. 更新融合速度
     gps_data.fused_speed_ms = max(0.0, imu_integrated_speed);
     gps_data.smooth_speed_kmh = gps_data.fused_speed_ms * 3.6;
     gps_data.acceleration_ms2 = forward_accel;
     gps_data.speed_increasing = (forward_accel > 0.5);
     gps_data.imu_speed_delta = forward_accel * dt;
-    
+
     last_fusion_time = now;
 }
 

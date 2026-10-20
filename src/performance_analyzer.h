@@ -112,8 +112,8 @@ void printFusedData();
 
 // ===== 摩托车模式函数 =====
 void initMotorcycleMode();
-void updateMotorcycleData();
-void calculateLeanAngle();
+void updateMotorcycleData(double sampleDt);
+void calculateLeanAngle(double sampleDt);
 void detectWheelieStoppie();
 void analyzeCorner();
 void resetMotorcycleSession();
